@@ -1,183 +1,129 @@
 # 🏪 POS System - ระบบขายหน้าร้าน
 
-ระบบ Point of Sale (POS) สำหรับร้านค้าแบบ Full System รองรับการขายหน้าร้าน จัดการสต๊อก รายงานยอดขาย และอื่นๆ
+ระบบ Point of Sale (POS) สำหรับร้านค้าปลีกไทย รองรับการขายหน้าร้าน จัดการสต๊อก รายงานยอดขาย และแจ้งเตือน
 
 ## 📋 คุณสมบัติ
 
 - 🔐 **ระบบผู้ใช้งาน** - Login, Logout, จัดการสิทธิ์ (Admin, Manager, Cashier)
-- 📦 **จัดการสินค้า** - เพิ่ม/แก้ไข/ลบ สินค้า, หมวดหมู่, SKU, Barcode
+- 📦 **จัดการสินค้า** - เพิ่ม/แก้ไข/ลบ สินค้า, หมวดหมู่, SKU, Barcode, อัพโหลดรูป
 - 📊 **จัดการสต๊อก** - รับเข้า/ตัดออก/ปรับยอด, แจ้งเตือนสินค้าใกล้หมด
-- 🛒 **หน้าจอขาย (POS)** - เลือกสินค้า, ตะกร้า, ส่วนลด, VAT
+- 🛒 **หน้าจอขาย (POS)** - เลือกสินค้า, ตะกร้า, ส่วนลด, VAT, ชำระเงิน
 - 💳 **ชำระเงิน** - เงินสด, QR PromptPay, โอนเงิน, บัตรเครดิต
-- 🧾 **ใบเสร็จ** - พิมพ์ใบเสร็จ, ดาวน์โหลด PDF
-- 📈 **รายงาน** - ยอดขาย, สินค้าขายดี, กำไรขาดทุน
-- 📊 **แดชบอร์ด** - ยอดขายวันนี้, กราฟ, สินค้าขายดี
-- 🔍 **สแกนบาร์โค้ด** - ค้นหาสินค้าจากบาร์โค้ด
+- 🔔 **แจ้งเตือน** - กระดิ่งแสดงสินค้าที่ขายวันนี้ + จุดแดง + ล้างได้
+- 📈 **รายงาน** - ยอดขาย, สินค้าขายดี, กำไรขาดทุน (admin/manager/cashier เข้าได้)
+- 📊 **แดชบอร์ด** - ยอดขายวันนี้, กราฟ, สินค้าขายดี (auto-refresh หลังขาย)
 
 ## 🛠️ เทคโนโลยี
 
 | ส่วน | เทคโนโลยี |
 |------|-----------|
-| Frontend | React 18 + TypeScript + Vite + Tailwind CSS |
-| Backend | Node.js + Express.js + TypeScript |
-| Database | MySQL 8.0 |
-| Auth | JWT (Access + Refresh Tokens) |
-| Charts | Recharts |
+| Frontend | React 18 + TypeScript + Vite 5 + Tailwind CSS 3 |
+| Backend | Node.js 20 + Express.js 4 + TypeScript |
+| Database | MySQL 8.0 (utf8mb4, timezone +07:00) |
+| Auth | JWT (Access 15m + Refresh 7d), bcryptjs |
 | State | Zustand |
-| HTTP | Axios |
-| Docs | Swagger/OpenAPI 3.0 |
-| Deploy | Docker + Docker Compose |
+| Charts | Recharts |
+| Deploy | Docker Compose + Nginx |
 
-## 🚀 การติดตั้ง
+## 🚀 การติดตั้น (Clone มาให้ทำงาน)
 
-### วิธีที่ 1: ใช้ Docker (แนะนำ)
-
-#### ขั้นตอนที่ 1: Clone โปรเจกต์
+### ขั้นตอนที่ 1: Clone
 ```bash
 git clone <repository-url>
 cd pos-system
 ```
 
-#### ขั้นตอนที่ 2: ตั้งค่า Environment
+### ขั้นตอนที่ 2: สร้างไฟล์ .env
 ```bash
 cp .env.example .env
-# แก้ไขไฟล์ .env ตามต้องการ
 ```
+แก้ไขค่าใน `.env` ถ้าต้องการเปลี่ยน (ค่า default ใช้ได้ทันที)
 
-#### ขั้นตอนที่ 3: Build และ Run
+### ขั้นตอนที่ 3: Build + Run
 ```bash
 docker-compose up -d --build
 ```
+> ⚠️ **สำคัญ:** ทุกครั้งที่แก้โค้ดแล้ว rebuild ต้องใช้ `--no-cache` เสมอ เพราะ Docker cache จะทำให้ใช้ build เก่า
+> ```bash
+> docker-compose build --no-cache backend frontend
+> docker-compose up -d --force-recreate backend frontend
+> ```
 
-#### ขั้นตอนที่ 4: เข้าใช้งาน
-- 🌐 Frontend: http://localhost
-- 🔌 Backend API: http://localhost:3000
-- 📚 API Docs: http://localhost:3000/api-docs
-- 🗄️ phpMyAdmin: http://localhost:8080 (รันด้วย `docker-compose --profile dev up -d`)
+### ขั้นตอนที่ 4: เข้าใช้งาน
+| Service | URL |
+|---------|-----|
+| 🌐 Frontend | http://localhost |
+| 🔌 Backend API | http://localhost:3000 |
+| 📚 Swagger Docs | http://localhost:3000/api-docs |
+| 🗄️ phpMyAdmin | http://localhost:8080 (dev only) |
 
-#### ข้อมูลเข้าสู่ระบบเริ่มต้น
+### ข้อมูลเข้าสู่ระบบ
 ```
 Username: admin
-Password: admin123
+Password: admin1234
 ```
-
-### วิธีที่ 2: รันแยก (Development)
-
-#### Backend
-```bash
-cd backend
-npm install
-cp ../.env.example .env
-npm run migrate
-npm run seed
-npm run dev
-```
-
-#### Frontend
-```bash
-cd frontend
-npm install
-npm run dev
-```
-
-#### MySQL
-- ติดตั้ง MySQL 8.0+
-- สร้างฐานข้อมูล `pos_system`
-- รัน migration files ใน `database/migrations/`
-- รัน seed files ใน `database/seeds/`
 
 ## 📁 โครงสร้างโปรเจกต์
-
 ```
 pos-system/
-├── docker-compose.yml          # Docker Compose configuration
-├── .env.example                # Environment template
-├── README.md                   # เอกสารนี้
-│
+├── CLAUDE.md                   ← 📌 อ่านไฟล์นี้ก่อน! (สำหรับ AI)
+├── docker-compose.yml
+├── .env.example
+├── README.md
 ├── backend/
-│   ├── Dockerfile
-│   ├── package.json
-│   ├── tsconfig.json
-│   └── src/
-│       ├── index.ts            # Entry point
-│       ├── app.ts              # Express app setup
-│       ├── config/             # Configuration
-│       ├── middleware/          # Express middleware
-│       ├── routes/             # API routes
-│       ├── controllers/        # Request handlers
-│       ├── services/           # Business logic
-│       ├── models/             # TypeScript types
-│       ├── utils/              # Utility functions
-│       └── scripts/            # Migration & seed scripts
-│
+│   ├── src/
+│   │   ├── index.ts / app.ts   ← Entry + Express setup
+│   │   ├── config/             ← database.ts, env.ts, swagger.ts
+│   │   ├── middleware/         ← auth, role, upload, validation, error
+│   │   ├── routes/             ← API routes (mount ที่ /api)
+│   │   ├── controllers/        ← Request handlers (thin)
+│   │   ├── services/           ← Business logic + raw SQL
+│   │   ├── models/types.ts     ← TypeScript interfaces
+│   │   ├── utils/              ← jwt, password, barcode, receipt
+│   │   └── scripts/            ← migrate.ts, seed.ts
+│   └── Dockerfile
 ├── frontend/
-│   ├── Dockerfile
+│   ├── src/
+│   │   ├── main.tsx / App.tsx  ← Entry + Router
+│   │   ├── api/                ← auth, products, pos, reports, dashboard, inventory, categories
+│   │   │   └── axios.ts        ← Shared instance
+│   │   ├── store/              ← auth (Zustand), notifications (Zustand)
+│   │   ├── context/            ← DialogContext (toast/confirm)
+│   │   ├── components/
+│   │   │   ├── layout/         ← MainLayout, Sidebar, Header (notification bell)
+│   │   │   ├── pos/            ← ProductGrid, CartSummary
+│   │   │   └── dialog/         ← ConfirmDialog, AlertDialog, Toast
+│   │   ├── pages/              ← Login, Dashboard, POS, Products, Categories, Inventory, Reports, Users, Settings
+│   │   └── utils/              ← format.ts (currency/date th-TH), constants.ts
 │   ├── nginx.conf
-│   ├── package.json
-│   ├── vite.config.ts
-│   ├── tailwind.config.js
-│   └── src/
-│       ├── main.tsx            # React entry
-│       ├── App.tsx             # Router
-│       ├── api/                # API clients
-│       ├── components/         # React components
-│       │   ├── common/         # Shared components
-│       │   ├── layout/         # Layout components
-│       │   ├── pos/            # POS-specific
-│       │   ├── products/       # Product management
-│       │   ├── inventory/      # Inventory management
-│       │   └── reports/        # Report components
-│       ├── pages/              # Page components
-│       ├── hooks/              # Custom hooks
-│       ├── context/            # React context
-│       ├── store/              # Zustand store
-│       └── utils/              # Utilities
-│
+│   └── Dockerfile
 └── database/
-    ├── migrations/             # SQL migration files
-    └── seeds/                  # Seed data
+    ├── 00_init.sql             ← Init script (tables + seeds)
+    └── migrations/*.sql        ← 001-009
 ```
 
-## 📚 API Endpoints
+## 🗄️ Database Tables (9 tables)
+| Table | หมายเหตุ |
+|-------|---------|
+| `users` | admin/manager/cashier, bcrypt, is_active |
+| `categories` | name, description |
+| `products` | FK→category, SKU, barcode, image_url, price, cost, unit, is_active |
+| `inventory` | 1:1 product, quantity, min_stock, location (**⚠️ ไม่มี is_active**) |
+| `transactions` | TXN code, status (completed/cancelled/refunded) |
+| `transaction_items` | snapshot product_name+price ตอนขาย |
+| `payments` | cash/promptpay/transfer/credit_card |
+| `inventory_logs` | in/out/adjustment audit trail |
+| `settings` | key-value config |
 
-| Method | Endpoint | Description |
-|--------|----------|-------------|
-| POST | /api/auth/login | เข้าสู่ระบบ |
-| POST | /api/auth/logout | ออกจากระบบ |
-| POST | /api/auth/refresh | รีเฟรช Token |
-| PUT | /api/auth/password | เปลี่ยนรหัสผ่าน |
-| GET | /api/auth/me | ข้อมูลผู้ใช้ปัจจุบัน |
-| GET | /api/users | รายการผู้ใช้ |
-| POST | /api/users | สร้างผู้ใช้ |
-| PUT | /api/users/:id | แก้ไขผู้ใช้ |
-| DELETE | /api/users/:id | ลบผู้ใช้ |
-| GET | /api/categories | หมวดหมู่ทั้งหมด |
-| POST | /api/categories | สร้างหมวดหมู่ |
-| PUT | /api/categories/:id | แก้ไขหมวดหมู่ |
-| DELETE | /api/categories/:id | ลบหมวดหมู่ |
-| GET | /api/products | รายการสินค้า |
-| GET | /api/products/barcode/:code | ค้นหาด้วยบาร์โค้ด |
-| POST | /api/products | สร้างสินค้า |
-| PUT | /api/products/:id | แก้ไขสินค้า |
-| DELETE | /api/products/:id | ลบสินค้า |
-| GET | /api/inventory | สต๊อกสินค้า |
-| GET | /api/inventory/low-stock | สินค้าใกล้หมด |
-| POST | /api/inventory/adjust | ปรับสต๊อก |
-| GET | /api/inventory/logs | ประวัติสต๊อก |
-| POST | /api/pos/checkout | ชำระเงิน |
-| GET | /api/pos/transactions | รายการขาย |
-| GET | /api/pos/transactions/:id | รายละเอียดการขาย |
-| GET | /api/reports/sales | รายงานยอดขาย |
-| GET | /api/reports/products | รายงานสินค้า |
-| GET | /api/reports/profit-loss | รายงานกำไรขาดทุน |
-| GET | /api/reports/inventory | รายงานสต๊อก |
-| GET | /api/dashboard/stats | สถิติแดชบอร์ด |
-| GET | /api/dashboard/charts | ข้อมูลกราฟ |
-| POST | /api/barcode/generate | สร้างบาร์โค้ด |
-| GET | /api/barcode/validate/:code | ตรวจสอบบาร์โค้ด |
+## 📌 ข้อควรรู้สำคัญ
+- **inventory ไม่มี `is_active`** — query ห้ามใส่ `i.is_active = TRUE`
+- **เวลา** — ใช้ `CURDATE()` ใน SQL แทน JS `toISOString()` (timezone +07:00)
+- **ราคา** — `DECIMAL(10,2)`, คำนวณฝั่ง backend
+- **Checkout** — MySQL transaction (BEGIN/COMMIT/ROLLBACK) ตัดสต็อก atomic
+- **Pagination** — 10 รายการ/หน้า, เติม empty rows ให้ความสูงคงที่
+- **Docker cache** — แก้โค้ดแล้วต้อง `build --no-cache` ไม่งั้นใช้ build เก่า
 
 ## 🔧 คำสั่ง Docker ที่ใช้บ่อย
-
 ```bash
 # เริ่มทุก service
 docker-compose up -d
@@ -185,32 +131,24 @@ docker-compose up -d
 # เริ่มพร้อม phpMyAdmin
 docker-compose --profile dev up -d
 
+# Rebuild หลังแก้โค้ด (สำคัญ!)
+docker-compose build --no-cache backend frontend
+docker-compose up -d --force-recreate backend frontend
+
 # ดู logs
 docker-compose logs -f backend
 docker-compose logs -f frontend
 
-# หยุดทุก service
+# หยุด
 docker-compose down
 
-# หยุดและลบข้อมูล (ระวัง!)
+# หยุด + ลบข้อมูล (ระวัง!)
 docker-compose down -v
 
-# Rebuild
-docker-compose up -d --build
-
-# เข้า shell ของ container
+# เข้า container
 docker exec -it pos-backend sh
-docker exec -it pos-mysql mysql -u root -p
+docker exec -it pos-mysql mysql -u root -prootpassword pos_system
 ```
 
-## 📝 หมายเหตุ
-
-- ระบบรองรับภาษาไทยเต็มรูปแบบ
-- ข้อมูลเริ่มต้น: admin/admin123
-- สินค้าตัวอย่าง 15 รายการถูกสร้างอัตโนมัติ
-- ระบบรองรับการอัปโหลดรูปภาพสินค้า
-- Barcode ถูกสร้างอัตโนมัติสำหรับสินค้าใหม่
-
 ## 📄 License
-
 MIT License

@@ -112,9 +112,12 @@ export default function Dashboard() {
     ? ((stats.grossProfit / stats.totalRevenue) * 100).toFixed(1)
     : '0';
 
-  const totalPayments = (stats?.cashSales || 0) + (stats?.promptpaySales || 0);
-  const cashPct = totalPayments > 0 ? ((stats?.cashSales || 0) / totalPayments * 100) : 0;
-  const promptpayPct = totalPayments > 0 ? ((stats?.promptpaySales || 0) / totalPayments * 100) : 0;
+  // Backend returns DECIMAL columns as strings (mysql2) — coerce to numbers so arithmetic works
+  const cashSales = Number(stats?.cashSales || 0);
+  const promptpaySales = Number(stats?.promptpaySales || 0);
+  const totalPayments = cashSales + promptpaySales;
+  const cashPct = totalPayments > 0 ? (cashSales / totalPayments * 100) : 0;
+  const promptpayPct = totalPayments > 0 ? (promptpaySales / totalPayments * 100) : 0;
 
   const maxChartAmount = Math.max(...chartData.map(d => d.amount), 1);
 
@@ -224,7 +227,7 @@ export default function Dashboard() {
                       <p className="text-xs text-gray-400">{stats?.cashCount || 0} บิล ({cashPct.toFixed(0)}%)</p>
                     </div>
                   </div>
-                  <p className="font-bold text-green-700">{formatCurrency(stats?.cashSales || 0)}</p>
+                  <p className="font-bold text-green-700">{formatCurrency(cashSales)}</p>
                 </div>
 
                 <div className="flex items-center justify-between p-3 bg-blue-50 rounded-xl">
@@ -237,7 +240,7 @@ export default function Dashboard() {
                       <p className="text-xs text-gray-400">{stats?.promptpayCount || 0} บิล ({promptpayPct.toFixed(0)}%)</p>
                     </div>
                   </div>
-                  <p className="font-bold text-blue-700">{formatCurrency(stats?.promptpaySales || 0)}</p>
+                  <p className="font-bold text-blue-700">{formatCurrency(promptpaySales)}</p>
                 </div>
               </div>
             </>

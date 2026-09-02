@@ -52,6 +52,22 @@ export async function adjustStock(req: Request, res: Response): Promise<void> {
   }
 }
 
+// PUT /api/inventory/min-stock
+export async function updateMinStock(req: Request, res: Response): Promise<void> {
+  try {
+    const { product_id, min_stock } = req.body;
+    const success = await inventoryService.updateMinStock(product_id, min_stock);
+    if (!success) {
+      res.status(404).json({ success: false, message: 'ไม่พบสินค้าในสต๊อก' });
+      return;
+    }
+    res.json({ success: true, message: 'ปรับจำนวนขั้นต่ำสำเร็จ' });
+  } catch (error) {
+    console.error('Update min stock error:', error);
+    res.status(500).json({ success: false, message: 'เกิดข้อผิดพลาด' });
+  }
+}
+
 // GET /api/inventory/logs
 export async function getInventoryLogs(req: Request, res: Response): Promise<void> {
   try {

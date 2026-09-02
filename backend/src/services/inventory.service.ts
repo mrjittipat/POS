@@ -18,15 +18,18 @@ export async function getInventory(
   }
 > {
   const offset = (page - 1) * limit;
-  let whereClause = 'WHERE 1=1';
+  let whereClause = 'p.is_deleted = FALSE';
   const params: (string | number)[] = [];
 
   if (lowStock) {
-    whereClause = 'WHERE i.quantity <= i.min_stock';
+    whereClause += ' AND i.quantity <= i.min_stock';
   }
 
   const [countRows] = await pool.execute(
-    `SELECT COUNT(*) as total FROM inventory i ${whereClause}`
+    `SELECT COUNT(*) as total FROM inventory i
+     JOIN products p ON i.product_id = p.id
+     WHERE ${whereClause}`,
+    params
   );
   const total = (countRows as { total: number }[])[0].total;
 
@@ -34,7 +37,7 @@ export async function getInventory(
     `SELECT i.*, p.name as product_name, p.sku
      FROM inventory i
      JOIN products p ON i.product_id = p.id
-     ${whereClause}
+     WHERE ${whereClause}
      ORDER BY i.quantity ASC
      LIMIT ${Number(limit)} OFFSET ${Number(offset)}`,
     params
@@ -51,7 +54,7 @@ export async function getLowStock(): Promise<
     `SELECT i.*, p.name as product_name, p.sku
      FROM inventory i
      JOIN products p ON i.product_id = p.id
-     WHERE i.quantity <= i.min_stock AND p.is_active = TRUE
+     WHERE i.quantity <= i.min_stock AND p.is_active = TRUE AND p.is_deleted = FALSE
      ORDER BY i.quantity ASC`
   );
   return rows as (Inventory & { product_name: string; sku: string | null })[];
@@ -149,4 +152,13 @@ export async function getInventoryLogs(
   );
 
   return { logs: rows as (InventoryLog & { product_name: string })[], total };
+}
+
+// Update minimum stock (จำนวนขั้นต่ำ) for a product
+export async function updateMinStock(productId: number, minStock: number): Promise<boolean> {
+  const [result] = await pool.execute(
+    'UPDATE inventory SET min_stock = ? WHERE product_id = ?',
+    [minStock, productId]
+  );
+  return (result as { affectedRows: number }).affectedRows > 0;
 }

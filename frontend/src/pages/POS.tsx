@@ -1,12 +1,38 @@
-import { useState, useCallback, useRef } from 'react';
+import { useState, useEffect, useRef } from 'react';
+import { useNavigate, useLocation } from 'react-router-dom';
+import { Store, ListOrdered, Package } from 'lucide-react';
 import ProductGrid from '../components/pos/ProductGrid';
-import CartSummary from '../components/pos/CartSummary';
-import { Product } from '../api/products.api';
-import { posApi, CartItem } from '../api/pos.api';
+import BillTable from '../components/pos/BillTable';
+import PosSidebar from '../components/pos/PosSidebar';
+import {
+  CheckProductModal,
+  ParkedBillModal,
+  MoneyDrawerModal,
+  ShiftSummaryModal,
+} from '../components/pos/PosModals';
 import { formatCurrency } from '../utils/format';
-import { X, Smartphone, Banknote, ImagePlus, CheckCircle, TrendingUp, Banknote as CashIcon, QrCode, RotateCcw } from 'lucide-react';
+import { useNow } from '../hooks/useNow';
+import { useCartStore } from '../store/cart';
+import { useAuthStore } from '../store';
+import {
+  getParkedBills,
+  saveParkedBill,
+  removeParkedBill,
+  getDrawerState,
+  addDrawerLog,
+  removeDrawerLog,
+  deductDrawerMoney,
+  removeDrawerLogsByRef,
+  resetDrawerState,
+  type ParkedBill,
+  type DrawerState,
+} from '../utils/posStorage';
 import { useDialog } from '../context/DialogContext';
-import { useNotificationStore } from '../store/notifications';
+import { dashboardApi } from '../api/dashboard.api';
+import { posApi } from '../api/pos.api';
+import { inventoryApi } from '../api/inventory.api';
+import { productsApi } from '../api/products.api';
+import type { Product } from '../api/products.api';
 
 interface SalesSummary {
   totalSales: number;
@@ -18,512 +44,451 @@ interface SalesSummary {
 }
 
 const initialSummary: SalesSummary = {
-  totalSales: 0,
-  totalTransactions: 0,
-  cashSales: 0,
-  cashCount: 0,
-  promptpaySales: 0,
-  promptpayCount: 0,
+  totalSales: 0, totalTransactions: 0, cashSales: 0, cashCount: 0, promptpaySales: 0, promptpayCount: 0,
 };
 
 export default function POS() {
-  const { toast } = useDialog();
-  const [cartItems, setCartItems] = useState<CartItem[]>([]);
-  const [discountAmount, setDiscountAmount] = useState(0);
-  const [discountType, setDiscountType] = useState<'percent' | 'fixed'>('fixed');
-  const [vatRate] = useState(7);
-  const [showPayment, setShowPayment] = useState(false);
-  const [processing, setProcessing] = useState(false);
+  const navigate = useNavigate();
+  const location = useLocation();
+  const { toast, showConfirm } = useDialog();
+  const now = useNow();
+  // admin/manager จัดการเงิน (ลบประวัติ + ลด/เพิ่ม) ได้, พนักงานขายดูได้อย่างเดียว
+  const canManageMoney = useAuthStore((s) => (s.user?.role === 'admin' || s.user?.role === 'manager'));
 
-  // Sales summary state
-  const [salesSummary, setSalesSummary] = useState<SalesSummary>(() => {
-    const saved = localStorage.getItem('pos_sales_summary');
-    return saved ? JSON.parse(saved) : initialSummary;
-  });
+  const cartItems = useCartStore((s) => s.items);
+  const addToCart = useCartStore((s) => s.addToCart);
+  const updateQuantity = useCartStore((s) => s.updateQuantity);
+  const removeItem = useCartStore((s) => s.removeItem);
+  const clearCart = useCartStore((s) => s.clearCart);
 
-  // Payment method selection
-  const [selectedMethod, setSelectedMethod] = useState<'cash' | 'promptpay' | null>(null);
+  const [search, setSearch] = useState('');
+  const [activeTab, setActiveTab] = useState<'products' | 'bill'>('bill');
+  // สต็อกสินค้า (product_id → จำนวนคงเหลือ)
+  const [stockMap, setStockMap] = useState<Record<number, number>>({});
+  // Use ref to store the latest stock map for immediate access (avoid React state delay)
+  const stockMapRef = useRef<Record<number, number>>({});
 
-  // Cash payment state
-  const [cashReceived, setCashReceived] = useState<number | ''>('');
-  const cashInputRef = useRef<HTMLInputElement>(null);
+  // modals
+  const [showCheckProduct, setShowCheckProduct] = useState(false);
+  const [showRecall, setShowRecall] = useState(false);
+  const [showMoney, setShowMoney] = useState(false);
+  const [moneyMode, setMoneyMode] = useState<'manage' | 'adjust'>('manage');
+  const [showShift, setShowShift] = useState(false);
+  const [showMobileSidebar, setShowMobileSidebar] = useState(false);
 
-  // PromptPay QR state
-  const [qrImageUrl, setQrImageUrl] = useState<string | null>(null);
+  // persisted data
+  const [salesSummary, setSalesSummary] = useState<SalesSummary>(initialSummary);
 
-  // Load QR image from localStorage on mount
-  useState(() => {
-    const saved = localStorage.getItem('payment.promptpay_qr');
-    if (saved) setQrImageUrl(saved);
-  });
+  // Handle barcode scan from global handler
+  useEffect(() => {
+    const state = location.state as { scannedBarcode?: string } | undefined;
+    if (state?.scannedBarcode) {
+      handleBarcodeScan(state.scannedBarcode);
+      // Clear the state to prevent re-triggering
+      window.history.replaceState({}, document.title);
+    }
+  }, [location.state]);
 
-  // Add product to cart
-  const handleAddToCart = useCallback((product: Product) => {
-    setCartItems((prev) => {
-      const existing = prev.find((item) => item.product_id === product.id);
-      if (existing) {
-        return prev.map((item) =>
-          item.product_id === product.id
-            ? {
-                ...item,
-                quantity: item.quantity + 1,
-                subtotal: (item.quantity + 1) * item.price - item.discount,
-              }
-            : item
-        );
+  const handleBarcodeScan = async (barcode: string) => {
+    try {
+      const res = await productsApi.getByBarcode(barcode);
+      const product = (res.data as { success: boolean; data: Product }).data;
+
+      if (!product.is_active) {
+        toast({ message: `"${product.name}" ไม่ได้เปิดใช้งาน`, type: 'warning' });
+        return;
       }
-      return [
-        ...prev,
-        {
-          product_id: product.id,
-          product_name: product.name,
-          barcode: product.barcode,
-          price: product.price,
-          quantity: 1,
-          discount: 0,
-          subtotal: product.price,
-        },
-      ];
-    });
+
+      // Check stock before adding - use ref for immediate access
+      const available = stockMapRef.current[product.id];
+      const inCart = cartItems.find((i) => i.product_id === product.id)?.quantity || 0;
+
+      console.log(`[Barcode] Product: ${product.name} (ID: ${product.id})`);
+      console.log(`[Barcode] Available stock: ${available}, In cart: ${inCart}`);
+      console.log(`[Barcode] Current stockMapRef:`, stockMapRef.current);
+
+      if (available === undefined || available <= 0) {
+        toast({ message: `"${product.name}" สินค้าหมด ไม่มีสต็อก`, type: 'warning' });
+        return;
+      }
+
+      if (inCart + 1 > available) {
+        toast({ message: `"${product.name}" สต็อกไม่เพียงพอ (คงเหลือ ${available} ชิ้น)`, type: 'warning' });
+        return;
+      }
+
+      handleAddToCart(product);
+      setActiveTab('bill');
+    } catch (error: any) {
+      const errMsg = error.response?.data?.message || 'ไม่พบสินค้า';
+      toast({ message: errMsg, type: 'error' });
+    }
+  };
+
+  // ดึงยอดขายวันนี้จริงจากฐานข้อมูล (รีตามวันอัตโนมัติ)
+  const loadTodayStats = async () => {
+    try {
+      const res = await dashboardApi.getStats();
+      const data = (res.data as { success: boolean; data: {
+        todaySales: number; todayOrders: number;
+        cashSales: number; cashCount: number;
+        promptpaySales: number; promptpayCount: number;
+      } }).data;
+      setSalesSummary({
+        totalSales: data.todaySales,
+        totalTransactions: data.todayOrders,
+        cashSales: data.cashSales,
+        cashCount: data.cashCount,
+        promptpaySales: data.promptpaySales,
+        promptpayCount: data.promptpayCount,
+      });
+    } catch {
+      // ignore
+    }
+  };
+
+  // Track if we're loading stock to prevent race conditions
+  const loadingStockRef = useRef(false);
+
+  useEffect(() => {
+    loadTodayStats();
+    loadStock();
   }, []);
 
-  // Update quantity
-  const handleUpdateQuantity = (productId: number, delta: number) => {
-    setCartItems((prev) =>
-      prev
-        .map((item) =>
-          item.product_id === productId
-            ? {
-                ...item,
-                quantity: Math.max(1, item.quantity + delta),
-                subtotal: Math.max(1, item.quantity + delta) * item.price - item.discount,
-              }
-            : item
-        )
-    );
-  };
-
-  // Remove item
-  const handleRemoveItem = (productId: number) => {
-    setCartItems((prev) => prev.filter((item) => item.product_id !== productId));
-  };
-
-  // Update item discount
-  const handleUpdateDiscount = (productId: number, discount: number) => {
-    setCartItems((prev) =>
-      prev.map((item) =>
-        item.product_id === productId
-          ? { ...item, discount, subtotal: item.quantity * item.price - discount }
-          : item
-      )
-    );
-  };
-
-  // Update bill discount
-  const handleUpdateBillDiscount = (amount: number, type: 'percent' | 'fixed') => {
-    setDiscountAmount(amount);
-    setDiscountType(type);
-  };
-
-  // Calculate totals
-  const subtotal = cartItems.reduce((sum, item) => sum + item.price * item.quantity, 0);
-  const itemDiscounts = cartItems.reduce((sum, item) => sum + item.discount, 0);
-  const afterItemDiscounts = subtotal - itemDiscounts;
-  let billDiscount = discountAmount;
-  if (discountType === 'percent') {
-    billDiscount = (afterItemDiscounts * discountAmount) / 100;
-  }
-  const afterBillDiscount = afterItemDiscounts - billDiscount;
-  const vatAmount = (afterBillDiscount * vatRate) / 100;
-  const netAmount = afterBillDiscount + vatAmount;
-
-  // Cash calculation
-  const cashReceivedNum = typeof cashReceived === 'number' ? cashReceived : parseFloat(cashReceived) || 0;
-  const changeAmount = cashReceivedNum - netAmount;
-  const isSufficient = cashReceivedNum >= netAmount;
-
-  // Select payment method
-  const handleSelectMethod = (method: 'cash' | 'promptpay') => {
-    setSelectedMethod(method);
-    setCashReceived('');
-    if (method === 'cash') {
-      setTimeout(() => cashInputRef.current?.focus(), 100);
+  // Reload stock when navigating back from checkout
+  useEffect(() => {
+    // Check if we just came back from checkout (location.state will be set by navigate)
+    if (location.state && 'fromCheckout' in location.state) {
+      loadStock();
+      // Clear the state so it doesn't trigger again
+      window.history.replaceState({}, document.title);
     }
-    // Reload QR image from localStorage
-    const saved = localStorage.getItem('payment.promptpay_qr');
-    if (saved) setQrImageUrl(saved);
+  }, [location]);
+
+  // โหลดสต็อกทั้งหมดมาเช็คจำนวนตอนเพิ่มสินค้า
+  const loadStock = async () => {
+    if (loadingStockRef.current) {
+      console.log('[POS] Stock load already in progress, skipping');
+      return;
+    }
+
+    loadingStockRef.current = true;
+    try {
+      const res = await inventoryApi.getAll(1, 1000);
+      const rows = (res.data as { success: boolean; data: { product_id: number; quantity: number }[] }).data;
+      const map: Record<number, number> = {};
+      rows.forEach((r) => {
+        if (r && typeof r.product_id === 'number') map[r.product_id] = Number(r.quantity ?? 0);
+      });
+      console.log('[POS] Loaded stock map:', map);
+      // Update both ref (immediate) and state (for UI)
+      stockMapRef.current = map;
+      setStockMap(map);
+    } catch (err) {
+      console.error('[POS] Failed to load stock:', err);
+    } finally {
+      loadingStockRef.current = false;
+    }
   };
 
-  // Update sales summary
-  const updateSalesSummary = (method: 'cash' | 'promptpay', amount: number) => {
-    setSalesSummary(prev => {
-      const updated = {
-        ...prev,
-        totalSales: prev.totalSales + amount,
-        totalTransactions: prev.totalTransactions + 1,
-        ...(method === 'cash'
-          ? { cashSales: prev.cashSales + amount, cashCount: prev.cashCount + 1 }
-          : { promptpaySales: prev.promptpaySales + amount, promptpayCount: prev.promptpayCount + 1 }
-        ),
-      };
-      localStorage.setItem('pos_sales_summary', JSON.stringify(updated));
-      return updated;
+  // เพิ่มสินค้าเข้าบิลพร้อมเช็คสต็อก
+  const handleAddToCart = (product: Product) => {
+    const available = stockMapRef.current[product.id];
+    // If stock info is missing (undefined), treat as out of stock
+    if (available === undefined || available <= 0) {
+      toast({
+        message: `"${product.name}" สินค้าหมด ไม่มีสต็อก`,
+        type: 'warning',
+      });
+      return;
+    }
+    const inCart = cartItems.find((i) => i.product_id === product.id)?.quantity || 0;
+    if (inCart + 1 > available) {
+      toast({
+        message: `"${product.name}" สต็อกไม่เพียงพอ (คงเหลือ ${available} ชิ้น)`,
+        type: 'warning',
+      });
+      return;
+    }
+    addToCart(product);
+  };
+
+  // ปรับจำนวนในบิลพร้อมเช็คสต็อก
+  const handleUpdateQuantity = (productId: number, delta: number) => {
+    if (delta > 0) {
+      const available = stockMapRef.current[productId] ?? Infinity;
+      const inCart = cartItems.find((i) => i.product_id === productId)?.quantity || 0;
+      if (inCart + delta > available) {
+        toast({ message: `สต็อกสินค้าไม่เพียงพอ (คงเหลือ ${available} ชิ้น)`, type: 'warning' });
+        return;
+      }
+    }
+    updateQuantity(productId, delta);
+  };
+  const [parkedBills, setParkedBills] = useState<ParkedBill[]>(() => getParkedBills());
+  const [drawer, setDrawer] = useState<DrawerState>(() => getDrawerState());
+
+  // totals (no VAT/discount shown on the register screen)
+  const totalItems = cartItems.reduce((sum, i) => sum + i.quantity, 0);
+  const subtotal = cartItems.reduce((sum, i) => sum + i.price * i.quantity, 0);
+
+  const clearCartAndGoProducts = () => {
+    clearCart();
+    setActiveTab('products');
+  };
+
+  const handleCancelSale = () => {
+    if (cartItems.length === 0) return;
+    showConfirm({
+      title: 'ยกเลิกการขาย',
+      message: 'แน่ใจว่าต้องการยกเลิกรายการทั้งหมดในบิลนี้?',
+      variant: 'danger',
+      confirmText: 'ยกเลิกการขาย',
+      onConfirm: () => {
+        clearCartAndGoProducts();
+        toast({ message: 'ยกเลิกการขายแล้ว', type: 'info' });
+      },
     });
   };
 
-  // Reset sales summary
-  const handleResetSummary = () => {
-    setSalesSummary(initialSummary);
-    localStorage.removeItem('pos_sales_summary');
-    toast({ message: 'รีเซ็ตยอดขายแล้ว', type: 'success' });
+  /* ----- park / recall ----- */
+  const handleParkBill = () => {
+    if (cartItems.length === 0) return;
+    const bill: ParkedBill = {
+      id: `${Date.now()}-${Math.random().toString(36).slice(2, 8)}`,
+      label: `บิล ${new Date().toLocaleTimeString('th-TH', { hour: '2-digit', minute: '2-digit' })} · ${totalItems} ชิ้น`,
+      items: cartItems,
+      total: subtotal,
+      at: new Date().toISOString(),
+    };
+    saveParkedBill(bill);
+    setParkedBills(getParkedBills());
+    clearCartAndGoProducts();
+    toast({ message: 'พักบิลแล้ว', type: 'success' });
   };
 
-  // Process checkout
-  const handleConfirmPayment = async () => {
-    if (!selectedMethod) return;
-    if (selectedMethod === 'cash' && !isSufficient) return;
+  const handleRestoreBill = (bill: ParkedBill) => {
+    useCartStore.getState().setItems(bill.items);
+    removeParkedBill(bill.id);
+    setParkedBills(getParkedBills());
+    setShowRecall(false);
+    toast({ message: 'เรียกคืนบิลแล้ว', type: 'success' });
+  };
 
-    setProcessing(true);
-    try {
-      await posApi.checkout({
-        items: cartItems,
-        discount_amount: discountAmount,
-        discount_type: discountType,
-        vat_rate: vatRate,
-        payments: [{ method: selectedMethod, amount: netAmount }],
-      });
+  const handleDeleteParked = (id: string) => {
+    removeParkedBill(id);
+    setParkedBills(getParkedBills());
+  };
 
-      // Update sales summary
-      updateSalesSummary(selectedMethod, netAmount);
+  /* ----- money drawer ----- */
+  const handleDrawerLog = (type: 'in' | 'out', amount: number, note: string) => {
+    setDrawer(addDrawerLog(type, amount, note));
+  };
 
-      // Clear everything
-      setCartItems([]);
-      setDiscountAmount(0);
-      setShowPayment(false);
-      setSelectedMethod(null);
-      setCashReceived('');
-      toast({ message: `การขายสำเร็จ! ยอดสะสม: ${formatCurrency(salesSummary.totalSales + netAmount)}`, type: 'success' });
+  const handleRemoveDrawerLog = (id: string) => {
+    setDrawer(removeDrawerLog(id));
+  };
 
-      // Trigger dashboard refresh
-      window.__refreshDashboard?.();
+  const handleResetDrawer = () => {
+    showConfirm({
+      title: 'รีเซ็ตเงินพัก',
+      message: 'รีเซ็ตยอดเงินในลิ้นชักกลับเป็น 0 และล้างประวัติเงินพักทั้งหมด?',
+      variant: 'danger',
+      confirmText: 'รีเซ็ต',
+      onConfirm: () => {
+        setDrawer(resetDrawerState());
+        toast({ message: 'รีเซ็ตเงินพักแล้ว', type: 'success' });
+      },
+    });
+  };
 
-      // Refresh notifications
-      try {
-        const res = await posApi.getTodaySoldItems();
-        const payload = res.data as { success: boolean; data: { product_name: string; quantity: number; subtotal: number; created_at: string }[] };
-        if (payload.success) useNotificationStore.getState().setItems(payload.data);
-      } catch {
-        // silently fail
+  const handleResetShift = () => {
+    showConfirm({
+      title: 'รีเซ็ตยอดขาย',
+      message: 'รีเซ็ตยอดขายสะสมของวันนี้?',
+      variant: 'danger',
+      confirmText: 'รีเซ็ต',
+      onConfirm: async () => {
+        try {
+          const res = await posApi.resetSales('today');
+          const data = (res.data as { data?: { cashReset?: number; transactionCodes?: string[] } }).data || {};
+          // ลบเงินพักเฉพาะรายการจากบิลที่ถูกรีเซ็ต (ตามเลข transaction)
+          const { state, removedCount, removedAmount } = removeDrawerLogsByRef(data.transactionCodes || []);
+          let drawerMsg = '';
+          if (removedCount > 0) {
+            setDrawer(state);
+            drawerMsg = ` (ลบเงินพัก ${removedCount} รายการ = ${formatCurrency(removedAmount)} บาท)`;
+          } else if (data.cashReset && data.cashReset > 0) {
+            // กรณี log เก่าไม่มีเลข transaction — หักรวมตามยอดเงินสด
+            setDrawer(deductDrawerMoney(data.cashReset, 'หักออกตามยอดขายที่รีเซ็ต'));
+            drawerMsg = ` (หักเงินพัก ${formatCurrency(data.cashReset)} บาท)`;
+          }
+          await loadTodayStats();
+          toast({ message: `รีเซ็ตยอดขายวันนี้แล้ว${drawerMsg}`, type: 'success' });
+        } catch {
+          toast({ message: 'เกิดข้อผิดพลาดในการรีเซ็ตยอดขาย', type: 'error' });
+        }
+      },
+    });
+  };
+
+  /* ----- keyboard ----- */
+  useEffect(() => {
+    const onKey = (e: KeyboardEvent) => {
+      const tag = (e.target as HTMLElement)?.tagName;
+      const inInput = tag === 'INPUT' || tag === 'SELECT' || tag === 'TEXTAREA';
+      if (e.key === 'Enter' && !inInput) {
+        if (cartItems.length > 0) navigate('/pos/checkout');
+      } else if (e.key === 'Escape') {
+        if (showMobileSidebar) setShowMobileSidebar(false);
+        else if (activeTab === 'bill') setActiveTab('products');
       }
-    } catch (error: unknown) {
-      const err = error as { response?: { data?: { message?: string } } };
-      toast({ message: err.response?.data?.message || 'เกิดข้อผิดพลาด', type: 'error' });
-    } finally {
-      setProcessing(false);
-    }
+    };
+    window.addEventListener('keydown', onKey);
+    return () => window.removeEventListener('keydown', onKey);
+  }, [cartItems.length, showMobileSidebar, activeTab, navigate]);
+
+  const openCheckout = () => {
+    if (cartItems.length === 0) return;
+    setShowMobileSidebar(false);
+    navigate('/pos/checkout');
   };
 
-  // Close payment modal
-  const handleClosePayment = () => {
-    if (processing) return;
-    setShowPayment(false);
-    setSelectedMethod(null);
-    setCashReceived('');
-  };
+  const dateStr = `${now.getDate().toString().padStart(2, '0')} / ${(now.getMonth() + 1).toString().padStart(2, '0')} / ${now.getFullYear()}`;
+  const timeStr = `${now.getHours().toString().padStart(2, '0')}:${now.getMinutes().toString().padStart(2, '0')}:${now.getSeconds().toString().padStart(2, '0')}`;
 
   return (
-    <div className="flex gap-4 h-[calc(100vh-8rem)]">
-      {/* Product grid */}
-      <div className="flex-1 card p-4">
-        <ProductGrid onAddToCart={handleAddToCart} />
-      </div>
-
-      {/* Cart + Sales Summary */}
-      <div className="w-96 space-y-4">
-        <CartSummary
-          items={cartItems}
-          discountAmount={discountAmount}
-          discountType={discountType}
-          vatRate={vatRate}
-          onUpdateQuantity={handleUpdateQuantity}
-          onRemoveItem={handleRemoveItem}
-          onUpdateDiscount={handleUpdateDiscount}
-          onUpdateBillDiscount={handleUpdateBillDiscount}
-          onCheckout={() => { if (cartItems.length === 0) return; setShowPayment(true); setSelectedMethod(null); setCashReceived(''); }}
-        />
-
-        {/* Sales Summary Card */}
-        <div className="card p-4">
-          <div className="flex items-center justify-between mb-3">
-            <div className="flex items-center gap-2">
-              <div className="w-8 h-8 rounded-lg bg-green-100 flex items-center justify-center">
-                <TrendingUp size={16} className="text-green-600" />
-              </div>
-              <h3 className="font-bold text-sm text-gray-700">ยอดขายวันนี้</h3>
-            </div>
-            {salesSummary.totalTransactions > 0 && (
-              <button
-                onClick={handleResetSummary}
-                className="text-gray-400 hover:text-red-500 transition-colors p-1 rounded-lg hover:bg-red-50"
-                title="รีเซ็ตยอดขาย"
-              >
-                <RotateCcw size={14} />
-              </button>
-            )}
-          </div>
-
-          {/* Total */}
-          <div className="bg-gradient-to-r from-green-50 to-emerald-50 rounded-xl p-3 mb-3 border border-green-100">
-            <p className="text-xs text-green-600 mb-0.5">ยอดขายสะสม</p>
-            <p className="text-2xl font-bold text-green-700">{formatCurrency(salesSummary.totalSales)}</p>
-            <p className="text-xs text-gray-500 mt-1">{salesSummary.totalTransactions} รายการ</p>
-          </div>
-
-          {/* Breakdown by payment method */}
-          <div className="grid grid-cols-2 gap-2">
-            {/* Cash */}
-            <div className="bg-gray-50 rounded-lg p-2.5">
-              <div className="flex items-center gap-1.5 mb-1">
-                <CashIcon size={12} className="text-green-600" />
-                <span className="text-xs text-gray-500">เงินสด</span>
-              </div>
-              <p className="font-bold text-sm text-gray-800">{formatCurrency(salesSummary.cashSales)}</p>
-              <p className="text-xs text-gray-400">{salesSummary.cashCount} รายการ</p>
-            </div>
-
-            {/* PromptPay */}
-            <div className="bg-gray-50 rounded-lg p-2.5">
-              <div className="flex items-center gap-1.5 mb-1">
-                <QrCode size={12} className="text-blue-600" />
-                <span className="text-xs text-gray-500">PromptPay</span>
-              </div>
-              <p className="font-bold text-sm text-gray-800">{formatCurrency(salesSummary.promptpaySales)}</p>
-              <p className="text-xs text-gray-400">{salesSummary.promptpayCount} รายการ</p>
-            </div>
-          </div>
-
-          {/* Empty state */}
-          {salesSummary.totalTransactions === 0 && (
-            <p className="text-center text-xs text-gray-400 mt-2">ยังไม่มีรายการขาย</p>
-          )}
+    <div className="flex flex-col h-[calc(100vh-7.5rem)] min-h-[560px]">
+      {/* ===== Header toolbar ===== */}
+      <div className="flex items-center gap-4 pb-3 border-b-2 border-gray-300 mb-3">
+        <div className="flex items-center gap-2">
+          <Store size={22} className="text-gray-700" />
+          <span className="font-bold text-xl tracking-wide">Store</span>
         </div>
+        <span className="text-sm text-gray-500 tabular-nums">{dateStr}</span>
+        <span className="hidden md:inline-flex px-2.5 py-1 rounded-full border border-green-300 bg-green-50 text-green-700 text-xs font-semibold">
+          ยอดขาย {formatCurrency(salesSummary.totalSales)}
+        </span>
+        <span className="ml-auto text-sm text-gray-500 tabular-nums">Time {timeStr}</span>
       </div>
 
-      {/* Payment modal */}
-      {showPayment && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center p-4" onClick={handleClosePayment}>
-          <div className="absolute inset-0 bg-black/40 backdrop-blur-sm" />
-          <div
-            className="relative bg-white rounded-2xl shadow-2xl w-full max-w-md animate-in fade-in zoom-in duration-200"
-            onClick={(e) => e.stopPropagation()}
-          >
-            {/* Header */}
-            <div className="flex items-center justify-between px-6 pt-6 pb-4 border-b border-gray-100">
-              <div className="flex items-center gap-3">
-                <div className="w-10 h-10 rounded-xl bg-green-100 flex items-center justify-center">
-                  {selectedMethod === 'cash' ? (
-                    <Banknote size={20} className="text-green-600" />
-                  ) : selectedMethod === 'promptpay' ? (
-                    <Smartphone size={20} className="text-blue-600" />
-                  ) : (
-                    <Banknote size={20} className="text-green-600" />
-                  )}
-                </div>
-                <div>
-                  <h3 className="text-lg font-bold text-gray-900">
-                    {!selectedMethod ? 'เลือกช่องทางชำระเงิน' : selectedMethod === 'cash' ? 'ชำระด้วยเงินสด' : 'ชำระด้วย QR PromptPay'}
-                  </h3>
-                </div>
+      {/* ===== Main split ===== */}
+      <div className="flex flex-1 gap-4 min-h-0">
+        {/* Left: 75% */}
+        <div className="flex-1 flex flex-col border border-gray-300 rounded-lg bg-white min-w-0">
+          {/* tabs */}
+          <div className="flex items-center border-b border-gray-300">
+            <button
+              onClick={() => setActiveTab('products')}
+              className={`flex items-center gap-1.5 px-4 py-2.5 text-sm font-semibold border-r border-gray-200 ${
+                activeTab === 'products' ? 'bg-sky-50 text-sky-700 border-b-2 border-b-sky-500' : 'text-gray-600 hover:bg-gray-50'
+              }`}
+            >
+              <Package size={16} /> สินค้า
+            </button>
+            <button
+              onClick={() => setActiveTab('bill')}
+              className={`flex items-center gap-1.5 px-4 py-2.5 text-sm font-semibold border-r border-gray-200 ${
+                activeTab === 'bill' ? 'bg-sky-50 text-sky-700 border-b-2 border-b-sky-500' : 'text-gray-600 hover:bg-gray-50'
+              }`}
+            >
+              <ListOrdered size={16} /> บิล {cartItems.length > 0 && `(${cartItems.length})`}
+            </button>
+          </div>
+
+          {/* content */}
+          <div className="flex-1 flex flex-col min-h-0">
+            {activeTab === 'products' ? (
+              <div className="flex-1 p-3 overflow-auto">
+                <ProductGrid onAddToCart={handleAddToCart} search={search} onSearchChange={setSearch} stockMap={stockMap} />
               </div>
-              <button
-                onClick={handleClosePayment}
-                disabled={processing}
-                className="w-8 h-8 rounded-lg flex items-center justify-center text-gray-400 hover:text-gray-600 hover:bg-gray-100 transition-colors disabled:opacity-50"
-              >
-                <X size={18} />
+            ) : (
+              <BillTable items={cartItems} onUpdateQuantity={handleUpdateQuantity} onRemoveItem={removeItem} />
+            )}
+
+            {/* summary bar */}
+            <div className="flex items-center justify-between border-t border-gray-300 bg-gray-50 px-4 py-3 text-sm">
+              <span className="text-gray-600">รวม <span className="font-semibold">{cartItems.length}</span> รายการ</span>
+              <span className="text-gray-600"><span className="font-semibold">{totalItems}</span> ชิ้น</span>
+              <button onClick={openCheckout} disabled={cartItems.length === 0} className="flex items-baseline gap-2 disabled:cursor-not-allowed">
+                <span className="text-gray-600">ยอดรวม</span>
+                <span className="text-xl font-bold text-gray-900 tabular-nums">{formatCurrency(subtotal)} บาท</span>
               </button>
             </div>
-
-            <div className="p-6">
-              {/* Total amount - always visible */}
-              <div className="text-center mb-6 p-4 bg-gray-50 rounded-xl">
-                <p className="text-sm text-gray-500 mb-1">ยอดชำระ</p>
-                <p className="text-3xl font-bold text-primary-600">
-                  {formatCurrency(netAmount)}
-                </p>
-              </div>
-
-              {/* Step 1: Select payment method */}
-              {!selectedMethod && (
-                <div className="space-y-3">
-                  {/* Cash */}
-                  <button
-                    onClick={() => handleSelectMethod('cash')}
-                    className="w-full flex items-center gap-4 p-4 rounded-xl border-2 border-gray-200 hover:border-green-500 hover:bg-green-50 transition-all group"
-                  >
-                    <div className="w-14 h-14 rounded-xl bg-green-100 flex items-center justify-center group-hover:bg-green-200 transition-colors">
-                      <Banknote size={28} className="text-green-600" />
-                    </div>
-                    <div className="text-left">
-                      <p className="font-bold text-gray-900 text-lg">เงินสด</p>
-                      <p className="text-sm text-gray-500">รับเงินจากลูกค้า คำนวณเงินทอนอัตโนมัติ</p>
-                    </div>
-                  </button>
-
-                  {/* QR PromptPay */}
-                  <button
-                    onClick={() => handleSelectMethod('promptpay')}
-                    className="w-full flex items-center gap-4 p-4 rounded-xl border-2 border-gray-200 hover:border-blue-500 hover:bg-blue-50 transition-all group"
-                  >
-                    <div className="w-14 h-14 rounded-xl bg-blue-100 flex items-center justify-center group-hover:bg-blue-200 transition-colors">
-                      <Smartphone size={28} className="text-blue-600" />
-                    </div>
-                    <div className="text-left">
-                      <p className="font-bold text-gray-900 text-lg">QR PromptPay</p>
-                      <p className="text-sm text-gray-500">สแกน QR Code เพื่อชำระเงิน</p>
-                    </div>
-                  </button>
-                </div>
-              )}
-
-              {/* Step 2a: Cash payment */}
-              {selectedMethod === 'cash' && (
-                <div className="space-y-5">
-                  {/* Back button */}
-                  <button
-                    onClick={() => { setSelectedMethod(null); setCashReceived(''); }}
-                    className="text-sm text-gray-500 hover:text-gray-700 flex items-center gap-1 transition-colors"
-                  >
-                    ← เลือกช่องทางอื่น
-                  </button>
-
-                  {/* Amount received input */}
-                  <div>
-                    <label className="block text-sm font-semibold text-gray-700 mb-2">รับเงินจากลูกค้า *</label>
-                    <div className="relative">
-                      <input
-                        ref={cashInputRef}
-                        type="number"
-                        min="0"
-                        step="0.01"
-                        value={cashReceived}
-                        onChange={(e) => {
-                          const val = e.target.value;
-                          setCashReceived(val === '' ? '' : parseFloat(val));
-                        }}
-                        className="input text-2xl font-bold text-center pr-12 focus:ring-2 focus:ring-green-500/20 focus:border-green-500"
-                        placeholder="0.00"
-                      />
-                      <span className="absolute right-4 top-1/2 -translate-y-1/2 text-gray-400 font-medium">฿</span>
-                    </div>
-                  </div>
-
-                  {/* Calculation result */}
-                  {cashReceivedNum > 0 && (
-                    <div className={`rounded-xl p-4 ${isSufficient ? 'bg-green-50 border border-green-200' : 'bg-orange-50 border border-orange-200'}`}>
-                      {isSufficient ? (
-                        <div className="flex items-center justify-between">
-                          <div className="flex items-center gap-2">
-                            <CheckCircle size={20} className="text-green-600" />
-                            <span className="font-medium text-green-700">เงินทอน</span>
-                          </div>
-                          <span className="text-2xl font-bold text-green-700">
-                            {formatCurrency(changeAmount)}
-                          </span>
-                        </div>
-                      ) : (
-                        <div className="text-center">
-                          <p className="font-medium text-orange-700">ยอดไม่เพียงพอ</p>
-                          <p className="text-sm text-orange-600 mt-1">
-                            ขาดอีก {formatCurrency(Math.abs(changeAmount))}
-                          </p>
-                        </div>
-                      )}
-                    </div>
-                  )}
-
-                  {/* Exact payment hint */}
-                  {cashReceivedNum > 0 && cashReceivedNum === netAmount && (
-                    <div className="text-center text-green-600 font-medium text-sm">
-                      ✓ จำนวนเงินพอดี
-                    </div>
-                  )}
-
-                  {/* Confirm button */}
-                  <button
-                    onClick={handleConfirmPayment}
-                    disabled={processing || !isSufficient || cashReceivedNum <= 0}
-                    className={`w-full py-3 px-4 rounded-xl font-bold text-lg transition-all ${
-                      isSufficient && cashReceivedNum > 0 && !processing
-                        ? 'bg-green-600 text-white hover:bg-green-700 shadow-lg shadow-green-600/25'
-                        : 'bg-gray-200 text-gray-400 cursor-not-allowed'
-                    }`}
-                  >
-                    {processing ? (
-                      <span className="flex items-center justify-center gap-2">
-                        <div className="animate-spin rounded-full h-5 w-5 border-2 border-white/30 border-t-white" />
-                        กำลังประมวลผล...
-                      </span>
-                    ) : 'ยืนยันการชำระเงิน'}
-                  </button>
-                </div>
-              )}
-
-              {/* Step 2b: QR PromptPay */}
-              {selectedMethod === 'promptpay' && (
-                <div className="space-y-5">
-                  {/* Back button */}
-                  <button
-                    onClick={() => setSelectedMethod(null)}
-                    className="text-sm text-gray-500 hover:text-gray-700 flex items-center gap-1 transition-colors"
-                  >
-                    ← เลือกช่องทางอื่น
-                  </button>
-
-                  {/* QR Image display */}
-                  <div className="flex flex-col items-center">
-                    {qrImageUrl ? (
-                      <div className="w-56 h-56 rounded-2xl border-2 border-gray-200 overflow-hidden bg-white shadow-inner">
-                        <img src={qrImageUrl} alt="PromptPay QR" className="w-full h-full object-contain" />
-                      </div>
-                    ) : (
-                      <div className="w-56 h-56 rounded-2xl border-2 border-dashed border-gray-300 flex flex-col items-center justify-center bg-gray-50">
-                        <ImagePlus size={40} className="text-gray-300 mb-2" />
-                        <p className="text-sm text-gray-400">ไม่มี QR Code</p>
-                        <p className="text-xs text-gray-400 mt-1">ไปที่ตั้งค่า → อัพโหลด QR</p>
-                      </div>
-                    )}
-                    <p className="text-sm text-gray-500 mt-3">ให้ลูกค้าสแกน QR Code เพื่อชำระเงิน</p>
-                  </div>
-
-                  {/* Payment completed button */}
-                  <button
-                    onClick={handleConfirmPayment}
-                    disabled={processing}
-                    className={`w-full py-3 px-4 rounded-xl font-bold text-lg transition-all ${
-                      !processing
-                        ? 'bg-blue-600 text-white hover:bg-blue-700 shadow-lg shadow-blue-600/25'
-                        : 'bg-blue-400 text-white cursor-wait'
-                    }`}
-                  >
-                    {processing ? (
-                      <span className="flex items-center justify-center gap-2">
-                        <div className="animate-spin rounded-full h-5 w-5 border-2 border-white/30 border-t-white" />
-                        กำลังประมวลผล...
-                      </span>
-                    ) : (
-                      <span className="flex items-center justify-center gap-2">
-                        <CheckCircle size={20} />
-                        ชำระเงินแล้ว
-                      </span>
-                    )}
-                  </button>
-                </div>
-              )}
-            </div>
           </div>
+        </div>
+
+        {/* Right: 25% sidebar */}
+        <aside className="hidden lg:flex w-[300px] shrink-0 flex-col">
+          <PosSidebar
+            hasItems={cartItems.length > 0}
+            onCancelSale={handleCancelSale}
+            onCheckProduct={() => setShowCheckProduct(true)}
+            onParkBill={handleParkBill}
+            onRecall={() => setShowRecall(true)}
+            onManageMoney={() => { setMoneyMode("manage"); setShowMoney(true); }}
+            onAdjustMoney={() => { setMoneyMode("adjust"); setShowMoney(true); }}
+            onShiftSummary={() => setShowShift(true)}
+            canAdjust={canManageMoney}
+            onEnter={openCheckout}
+          />
+        </aside>
+      </div>
+
+      {/* ===== Mobile bottom bar ===== */}
+      <div className="lg:hidden mt-3 grid grid-cols-2 gap-2">
+        <button
+          onClick={openCheckout}
+          disabled={cartItems.length === 0}
+          className="py-3 rounded-lg bg-sky-500 text-white font-bold disabled:bg-gray-300 disabled:cursor-not-allowed"
+        >
+          Enter / ชำระเงิน
+        </button>
+        <button
+          onClick={() => setShowMobileSidebar((v) => !v)}
+          className="py-3 rounded-lg border border-gray-300 text-gray-700 font-semibold"
+        >
+          ปุ่มฟังก์ชัน
+        </button>
+      </div>
+
+      {showMobileSidebar && (
+        <div className="lg:hidden border border-gray-300 rounded-lg bg-white p-2">
+          <PosSidebar
+            hasItems={cartItems.length > 0}
+            onCancelSale={handleCancelSale}
+            onCheckProduct={() => setShowCheckProduct(true)}
+            onParkBill={handleParkBill}
+            onRecall={() => setShowRecall(true)}
+            onManageMoney={() => { setMoneyMode("manage"); setShowMoney(true); }}
+            onAdjustMoney={() => { setMoneyMode("adjust"); setShowMoney(true); }}
+            onShiftSummary={() => setShowShift(true)}
+            canAdjust={canManageMoney}
+            onEnter={openCheckout}
+          />
         </div>
       )}
+
+      {/* ===== Modals ===== */}
+      <CheckProductModal open={showCheckProduct} onClose={() => setShowCheckProduct(false)} />
+      <ParkedBillModal
+        open={showRecall}
+        onClose={() => setShowRecall(false)}
+        bills={parkedBills}
+        onRestore={handleRestoreBill}
+        onDelete={handleDeleteParked}
+      />
+      <MoneyDrawerModal
+        open={showMoney}
+        onClose={() => setShowMoney(false)}
+        drawer={drawer}
+        mode={moneyMode}
+        canManage={canManageMoney}
+        onLog={handleDrawerLog}
+        onDeleteLog={handleRemoveDrawerLog}
+        onResetDrawer={handleResetDrawer}
+      />
+      <ShiftSummaryModal open={showShift} onClose={() => setShowShift(false)} salesSummary={salesSummary} drawer={drawer} onReset={handleResetShift} />
     </div>
   );
 }

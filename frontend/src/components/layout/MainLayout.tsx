@@ -12,6 +12,7 @@ const pageTitles: Record<string, string> = {
   '/reports': 'รายงาน',
   '/users': 'จัดการผู้ใช้งาน',
   '/settings': 'ตั้งค่าระบบ',
+  '/profile': 'โปรไฟล์',
 };
 
 export default function MainLayout() {

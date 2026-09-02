@@ -35,6 +35,15 @@ router.put(
   authController.changePassword
 );
 
+router.put(
+  '/profile',
+  authMiddleware,
+  validate([
+    body('full_name').notEmpty().withMessage('กรุณาระบุชื่อ-นามสกุล'),
+  ]),
+  authController.updateProfile
+);
+
 router.get('/me', authMiddleware, authController.getMe);
 
 export default router;

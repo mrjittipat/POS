@@ -75,3 +75,18 @@ export async function getUserById(userId: number): Promise<Omit<User, 'password'
   const { password: _, ...user } = users[0];
   return user as Omit<User, 'password'>;
 }
+
+// Update own profile (full_name, phone)
+export async function updateProfile(
+  userId: number,
+  full_name: string,
+  phone: string | null
+): Promise<Omit<User, 'password'> | null> {
+  await pool.execute('UPDATE users SET full_name = ?, phone = ? WHERE id = ?', [
+    full_name,
+    phone || null,
+    userId,
+  ]);
+
+  return getUserById(userId);
+}

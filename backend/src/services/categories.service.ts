@@ -25,10 +25,11 @@ export async function getCategoryById(id: number): Promise<Category | null> {
 export async function createCategory(data: {
   name: string;
   description?: string;
+  is_active?: boolean;
 }): Promise<number> {
   const [result] = await pool.execute(
-    'INSERT INTO categories (name, description) VALUES (?, ?)',
-    [data.name, data.description || null]
+    'INSERT INTO categories (name, description, is_active) VALUES (?, ?, ?)',
+    [data.name, data.description || null, data.is_active === false ? 0 : 1]
   );
   return (result as { insertId: number }).insertId;
 }
@@ -36,10 +37,10 @@ export async function createCategory(data: {
 // Update category
 export async function updateCategory(
   id: number,
-  data: { name?: string; description?: string }
+  data: { name?: string; description?: string; is_active?: boolean }
 ): Promise<boolean> {
   const fields: string[] = [];
-  const values: (string | number | null)[] = [];
+  const values: (string | number | boolean | null)[] = [];
 
   if (data.name !== undefined) {
     fields.push('name = ?');
@@ -48,6 +49,10 @@ export async function updateCategory(
   if (data.description !== undefined) {
     fields.push('description = ?');
     values.push(data.description);
+  }
+  if (data.is_active !== undefined) {
+    fields.push('is_active = ?');
+    values.push(data.is_active ? 1 : 0);
   }
 
   if (fields.length === 0) return false;

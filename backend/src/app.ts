@@ -17,6 +17,8 @@ import posRoutes from './routes/pos.routes';
 import reportsRoutes from './routes/reports.routes';
 import dashboardRoutes from './routes/dashboard.routes';
 import barcodeRoutes from './routes/barcode.routes';
+import migrationRoutes from './routes/migration.routes';
+import productImagesRoutes from './routes/productImages.routes';
 
 /**
  * Express Application Setup
@@ -62,6 +64,8 @@ app.use('/api/pos', posRoutes);
 app.use('/api/reports', reportsRoutes);
 app.use('/api/dashboard', dashboardRoutes);
 app.use('/api/barcode', barcodeRoutes);
+app.use('/api/migration', migrationRoutes);
+app.use('/api/product-images', productImagesRoutes);
 
 // 404 handler
 app.use((_req, res) => {

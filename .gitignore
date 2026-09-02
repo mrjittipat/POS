@@ -31,3 +31,9 @@ npm-debug.log*
 
 # Docker
 .docker/
+
+# Sensitive / temp files - do not commit
+token.txt
+login.json
+fix_unique_constraint.sql
+fix_*.sql

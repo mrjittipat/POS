@@ -2,6 +2,7 @@ import { useState, useEffect } from 'react';
 import { categoriesApi } from '../api/categories.api';
 import { Plus, Edit, Trash2, X, FolderOpen } from 'lucide-react';
 import { useDialog } from '../context/DialogContext';
+import { useAuthStore } from '../store';
 
 interface Category {
   id: number;
@@ -11,6 +12,8 @@ interface Category {
 
 export default function Categories() {
   const { showConfirm, toast } = useDialog();
+  const { user } = useAuthStore();
+  const canWrite = user?.role !== 'cashier'; // พนักงานขายดูได้อย่างเดียว
   const [categories, setCategories] = useState<Category[]>([]);
   const [_loading, setLoading] = useState(true);
   const [showForm, setShowForm] = useState(false);
@@ -82,10 +85,12 @@ export default function Categories() {
     <div className="space-y-4">
       <div className="flex justify-between items-center">
         <h2 className="text-lg font-bold">หมวดหมู่สินค้า ({categories.length})</h2>
-        <button onClick={() => setShowForm(true)} className="btn btn-primary flex items-center gap-2">
-          <Plus size={18} />
-          เพิ่มหมวดหมู่
-        </button>
+        {canWrite && (
+          <button onClick={() => setShowForm(true)} className="btn btn-primary flex items-center gap-2">
+            <Plus size={18} />
+            เพิ่มหมวดหมู่
+          </button>
+        )}
       </div>
 
       <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
@@ -99,12 +104,16 @@ export default function Categories() {
                 )}
               </div>
               <div className="flex gap-1">
-                <button onClick={() => handleEdit(category)} className="p-2 text-blue-600 hover:bg-blue-50 rounded-lg">
-                  <Edit size={16} />
-                </button>
-                <button onClick={() => handleDelete(category.id)} className="p-2 text-red-600 hover:bg-red-50 rounded-lg">
-                  <Trash2 size={16} />
-                </button>
+                {canWrite && (
+                  <>
+                    <button onClick={() => handleEdit(category)} className="p-2 text-blue-600 hover:bg-blue-50 rounded-lg">
+                      <Edit size={16} />
+                    </button>
+                    <button onClick={() => handleDelete(category.id)} className="p-2 text-red-600 hover:bg-red-50 rounded-lg">
+                      <Trash2 size={16} />
+                    </button>
+                  </>
+                )}
               </div>
             </div>
           </div>

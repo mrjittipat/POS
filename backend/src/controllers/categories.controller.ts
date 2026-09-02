@@ -19,8 +19,8 @@ export async function getCategories(req: Request, res: Response): Promise<void> 
 // POST /api/categories
 export async function createCategory(req: Request, res: Response): Promise<void> {
   try {
-    const { name, description } = req.body;
-    const id = await categoriesService.createCategory({ name, description });
+    const { name, description, is_active } = req.body;
+    const id = await categoriesService.createCategory({ name, description, is_active });
     res.status(201).json({ success: true, message: 'สร้างหมวดหมู่สำเร็จ', data: { id } });
   } catch (error) {
     console.error('Create category error:', error);
@@ -32,8 +32,8 @@ export async function createCategory(req: Request, res: Response): Promise<void>
 export async function updateCategory(req: Request, res: Response): Promise<void> {
   try {
     const id = parseInt(req.params.id, 10);
-    const { name, description } = req.body;
-    const success = await categoriesService.updateCategory(id, { name, description });
+    const { name, description, is_active } = req.body;
+    const success = await categoriesService.updateCategory(id, { name, description, is_active });
     if (!success) {
       res.status(404).json({ success: false, message: 'ไม่พบหมวดหมู่' });
       return;

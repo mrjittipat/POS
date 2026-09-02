@@ -19,7 +19,7 @@ services:
       interval: 10s
       timeout: 5s
       retries: 5
-    command: --default-authentication-plugin=mysql_native_password --character-set-server=utf8mb4 --collation-server=utf8mb4_unicode_ci --init-connect='SET NAMES utf8mb4' --character-set-client-handshake=FALSE
+    command: --default-authentication-plugin=mysql_native_password --character-set-server=utf8mb4 --collation-server=utf8mb4_unicode_ci --init-connect='SET NAMES utf8mb4' --character-set-client-handshake=FALSE --default-time-zone='+07:00' --explicit_defaults_for_timestamp
 
   # Backend API
   backend:
@@ -31,9 +31,9 @@ services:
     environment:
       NODE_ENV: ${NODE_ENV:-production}
       PORT: 3000
-      DB_HOST: mysql
-      DB_PORT: 3306
-      DB_USER: root
+      DB_HOST: ${DB_HOST:-mysql}
+      DB_PORT: ${DB_PORT:-3306}
+      DB_USER: ${DB_USER:-root}
       DB_PASSWORD: ${DB_PASSWORD:-rootpassword}
       DB_NAME: ${DB_NAME:-pos_system}
       JWT_SECRET: ${JWT_SECRET:-your-super-secret-jwt-key-change-in-production}

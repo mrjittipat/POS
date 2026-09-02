@@ -32,6 +32,7 @@ export default function Users() {
     phone: '',
   });
   const { user: currentUser } = useAuthStore();
+  const isManager = currentUser?.role === 'manager';
 
   const loadUsers = async () => {
     try {
@@ -272,9 +273,12 @@ export default function Users() {
                 <label className="block text-sm font-semibold text-gray-700 mb-1.5">บทบาท</label>
                 <select value={formData.role} onChange={(e) => setFormData({ ...formData, role: e.target.value })} className="input focus:ring-2 focus:ring-primary-500/20 focus:border-primary-500">
                   <option value="cashier">พนักงานขาย</option>
-                  <option value="manager">ผู้จัดการ</option>
-                  <option value="admin">ผู้ดูแลระบบ</option>
+                  {!isManager && <option value="manager">ผู้จัดการ</option>}
+                  {!isManager && <option value="admin">ผู้ดูแลระบบ</option>}
                 </select>
+                {isManager && (
+                  <p className="text-xs text-gray-400 mt-1">คุณ (ผู้จัดการ) สร้างได้เฉพาะพนักงานขายเท่านั้น</p>
+                )}
               </div>
               <div>
                 <label className="block text-sm font-semibold text-gray-700 mb-1.5">เบอร์โทร</label>

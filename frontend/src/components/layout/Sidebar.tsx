@@ -9,43 +9,51 @@ import {
   Users,
   Settings,
   LogOut,
+  Image,
 } from 'lucide-react';
 import { useAuthStore } from '../../store';
+import { getStoreBrand } from '../../utils/storeBrand';
+import Avatar from '../Avatar';
 
 const menuItems = [
   { to: '/', icon: LayoutDashboard, label: 'แดชบอร์ด' },
   { to: '/pos', icon: ShoppingCart, label: 'การขาย' },
   { to: '/products', icon: Package, label: 'สินค้า' },
-  { to: '/categories', icon: FolderOpen, label: 'หมวดหมู่' },
   { to: '/inventory', icon: Warehouse, label: 'สต๊อก' },
+  { to: '/categories', icon: FolderOpen, label: 'หมวดหมู่' },
   { to: '/reports', icon: FileBarChart, label: 'รายงาน' },
 ];
 
 const adminItems = [
   { to: '/users', icon: Users, label: 'ผู้ใช้งาน' },
+  { to: '/product-images', icon: Image, label: 'จัดการรูปภาพ' },
   { to: '/settings', icon: Settings, label: 'ตั้งค่า' },
 ];
 
 export default function Sidebar() {
   const { user, logout } = useAuthStore();
   const isAdmin = user?.role === 'admin' || user?.role === 'manager';
+  const { name: storeName, tagline: storeTagline } = getStoreBrand();
 
   return (
-    <aside className="w-64 bg-gray-900 text-white flex flex-col min-h-screen">
+    <aside className="w-64 shrink-0 bg-gray-900 text-white flex flex-col h-screen sticky top-0 self-start">
       {/* Logo */}
       <div className="p-6 border-b border-gray-700">
-        <h1 className="text-xl font-bold">POS System</h1>
-        <p className="text-gray-400 text-sm mt-1">ระบบขายหน้าร้าน</p>
+        <h1 className="text-xl font-bold truncate">{storeName}</h1>
+        <p className="text-gray-400 text-sm mt-1 truncate">{storeTagline}</p>
       </div>
 
       {/* User info */}
-      <div className="p-4 border-b border-gray-700">
-        <p className="font-medium">{user?.full_name}</p>
-        <p className="text-gray-400 text-sm">{user?.role === 'admin' ? 'ผู้ดูแลระบบ' : user?.role === 'manager' ? 'ผู้จัดการ' : 'พนักงานขาย'}</p>
+      <div className="p-4 border-b border-gray-700 flex items-center gap-3">
+        <Avatar userId={user?.id} name={user?.full_name} className="w-10 h-10 text-sm" />
+        <div className="min-w-0">
+          <p className="font-medium truncate">{user?.full_name}</p>
+          <p className="text-gray-400 text-sm truncate">{user?.role === 'admin' ? 'ผู้ดูแลระบบ' : user?.role === 'manager' ? 'ผู้จัดการ' : 'พนักงานขาย'}</p>
+        </div>
       </div>
 
       {/* Navigation */}
-      <nav className="flex-1 py-4">
+      <nav className="flex-1 py-4 overflow-y-auto scrollbar-hide">
         <ul className="space-y-1 px-2">
           {menuItems.map((item) => (
             <li key={item.to}>

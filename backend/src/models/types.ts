@@ -19,6 +19,7 @@ export interface Category {
   id: number;
   name: string;
   description: string | null;
+  is_active: boolean;
   created_at: Date;
   updated_at: Date;
 }
@@ -35,6 +36,7 @@ export interface Product {
   cost: number;
   unit: string;
   is_active: boolean;
+  is_deleted: boolean;
   created_at: Date;
   updated_at: Date;
 }

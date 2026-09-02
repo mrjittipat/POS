@@ -11,10 +11,21 @@ router.get('/', authMiddleware, inventoryController.getInventory);
 router.get('/low-stock', authMiddleware, inventoryController.getLowStock);
 router.get('/logs', authMiddleware, inventoryController.getInventoryLogs);
 
+router.put(
+  '/min-stock',
+  authMiddleware,
+  roleMiddleware('admin', 'manager', 'cashier'),
+  validate([
+    body('product_id').isInt().withMessage('กรุณาระบุสินค้า'),
+    body('min_stock').isInt({ min: 0 }).withMessage('จำนวนขั้นต่ำต้องเป็นตัวเลขไม่ติดลบ'),
+  ]),
+  inventoryController.updateMinStock
+);
+
 router.post(
   '/adjust',
   authMiddleware,
-  roleMiddleware('admin', 'manager'),
+  roleMiddleware('admin', 'manager', 'cashier'),
   validate([
     body('product_id').isInt().withMessage('กรุณาระบุสินค้า'),
     body('quantity').isInt({ min: 1 }).withMessage('จำนวนต้องมากกว่า 0'),

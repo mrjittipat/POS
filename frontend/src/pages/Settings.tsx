@@ -1,11 +1,49 @@
 import { useState, useRef, useEffect } from 'react';
-import { Save, Store, ImagePlus, Trash2, CreditCard } from 'lucide-react';
+import { Save, Store, ImagePlus, Trash2, CreditCard, RefreshCw, ArchiveRestore } from 'lucide-react';
 import { useDialog } from '../context/DialogContext';
+import { posApi } from '../api/pos.api';
+import { deductDrawerMoney, removeDrawerLogsByRef } from '../utils/posStorage';
+import { formatCurrency } from '../utils/format';
 
 export default function Settings() {
-  const { toast } = useDialog();
+  const { toast, showConfirm } = useDialog();
+
+  const handleResetSales = (scope: 'today' | 'all') => {
+    const label = scope === 'all' ? 'ทั้งหมด (ทุกวัน)' : 'เฉพาะวันนี้';
+    showConfirm({
+      title: scope === 'all' ? 'รีเซ็ตยอดขายทั้งหมด' : 'รีเซ็ตยอดขายวันนี้',
+      message:
+        scope === 'all'
+          ? 'แน่ใจว่าต้องการรีเซ็ตยอดขายทั้งหมด? จะลบบิลที่ขายมาแล้วทั้งหมด (ทุกวัน) และคืนสต็อกเข้าคลัง (ไม่สามารถย้อนกลับได้)'
+          : 'แน่ใจว่าต้องการรีเซ็ตยอดขายวันนี้? จะลบบิลที่ขายวันนี้ทั้งหมด และคืนสต็อกเข้าคลัง (ไม่สามารถย้อนกลับได้)',
+      variant: 'danger',
+      confirmText: 'รีเซ็ต',
+      onConfirm: async () => {
+        try {
+          const res = await posApi.resetSales(scope);
+          const data = (res.data as { data?: { cashReset?: number; transactionCodes?: string[] }; message?: string }).data || {};
+          let msg = (res.data as { message?: string })?.message || `รีเซ็ตยอดขาย${label}แล้ว`;
+
+          // ลบเงินพักเฉพาะรายการจากบิลที่ถูกรีเซ็ต (ตามเลข transaction)
+          const { removedCount, removedAmount } = removeDrawerLogsByRef(data.transactionCodes || []);
+          if (removedCount > 0) {
+            msg += ` (ลบเงินพักจากบิล ${removedCount} รายการ = ${formatCurrency(removedAmount)} บาท)`;
+          } else if (data.cashReset && data.cashReset > 0) {
+            // กรณี log เก่าไม่มีเลข transaction — หักรวมตามยอดเงินสด
+            deductDrawerMoney(data.cashReset, 'หักออกตามยอดขายที่รีเซ็ต');
+            msg += ` (หักเงินพัก ${formatCurrency(data.cashReset)} บาท)`;
+          }
+          toast({ message: msg, type: 'success' });
+        } catch {
+          toast({ message: 'เกิดข้อผิดพลาดในการรีเซ็ตยอดขาย', type: 'error' });
+        }
+      },
+    });
+  };
   const [settings, setSettings] = useState({
     store_name: 'ร้านค้า POS System',
+    store_brand_name: 'POS System',
+    store_brand_tagline: 'ระบบขายหน้าร้าน',
     store_address: '123 ถนนสุขุมวิท กรุงเทพฯ 10110',
     store_phone: '02-123-4567',
     tax_id: '0123456789012',
@@ -105,10 +143,13 @@ export default function Settings() {
             <label className="block text-sm font-medium text-gray-700 mb-1">ชื่อร้านค้า</label>
             <input
               type="text"
-              value={settings.store_name}
-              onChange={(e) => setSettings({ ...settings, store_name: e.target.value })}
-              className="input"
+              value={settings.store_brand_name}
+              disabled
+              className="input bg-gray-100 text-gray-500"
             />
+            <p className="text-xs text-gray-400 mt-1">
+              ล็อกตามชื่อร้านจากเมนู "เปลี่ยนชื่อร้าน &amp; คำนำ" (แก้ไขได้ที่ตรงนั้น)
+            </p>
           </div>
 
           <div>
@@ -169,6 +210,48 @@ export default function Settings() {
             บันทึกการตั้งค่า
           </button>
         </form>
+      </div>
+
+      {/* Store Brand - ชื่อร้าน & คำนำ */}
+      <div className="card p-6">
+        <div className="flex items-center gap-3 mb-6">
+          <div className="w-12 h-12 bg-purple-600 rounded-xl flex items-center justify-center text-white">
+            <Store size={24} />
+          </div>
+          <div>
+            <h2 className="text-xl font-bold">เปลี่ยนชื่อร้าน & คำนำ</h2>
+            <p className="text-gray-500 text-sm">ชื่อร้านและคำนำที่แสดงที่เมนูด้านซ้ายและหน้าเข้าสู่ระบบ</p>
+          </div>
+        </div>
+
+        <div className="space-y-4">
+          <div>
+            <label className="block text-sm font-medium text-gray-700 mb-1">ชื่อร้าน</label>
+            <input
+              type="text"
+              value={settings.store_brand_name}
+              onChange={(e) => setSettings({ ...settings, store_brand_name: e.target.value })}
+              className="input"
+              placeholder="เช่น 7-Eleven, Lotus's"
+            />
+          </div>
+
+          <div>
+            <label className="block text-sm font-medium text-gray-700 mb-1">คำนำ</label>
+            <input
+              type="text"
+              value={settings.store_brand_tagline}
+              onChange={(e) => setSettings({ ...settings, store_brand_tagline: e.target.value })}
+              className="input"
+              placeholder="เช่น ระบบขายหน้าร้าน"
+            />
+          </div>
+
+          <button type="button" onClick={handleSave} className="btn btn-primary flex items-center gap-2">
+            <Save size={18} />
+            บันทึกชื่อร้าน & คำนำ
+          </button>
+        </div>
       </div>
 
       {/* Payment Settings - PromptPay QR */}
@@ -243,6 +326,68 @@ export default function Settings() {
           <div className="bg-blue-50 border border-blue-200 rounded-xl p-4">
             <p className="text-sm text-blue-700">
               <strong>วิธีใช้:</strong> อัพโหลดรูป QR Code จากธนาคารของคุณ จากนั้น QR จะแสดงในหน้าชำระเงิน POS โดยอัตโนมัติ
+            </p>
+          </div>
+        </div>
+      </div>
+
+      {/* รีเซ็ตยอดขายทั้งหมด */}
+      <div className="grid grid-cols-2 gap-6">
+        <div className="card p-6 border-red-200">
+          <div className="flex items-center gap-3 mb-6">
+            <div className="w-12 h-12 bg-red-600 rounded-xl flex items-center justify-center text-white">
+              <RefreshCw size={24} />
+            </div>
+            <div>
+              <h2 className="text-xl font-bold">รีเซ็ตยอดขาย</h2>
+              <p className="text-gray-500 text-sm">รีเซ็ตยอดขายวันนี้หรือทั้งหมด</p>
+            </div>
+          </div>
+          <div className="space-y-3">
+            <button
+              type="button"
+              onClick={() => handleResetSales('today')}
+              className="btn w-full flex items-center justify-center gap-2 text-white bg-orange-500 hover:bg-orange-600"
+            >
+              <RefreshCw size={16} />
+              รีเซ็ตยอดขายวันนี้
+            </button>
+            <button
+              type="button"
+              onClick={() => handleResetSales('all')}
+              className="btn w-full flex items-center justify-center gap-2 text-white bg-red-600 hover:bg-red-700"
+            >
+              <Trash2 size={16} />
+              รีเซ็ตทั้งหมด
+            </button>
+            <p className="text-xs text-gray-400">
+              ลบรายการขายและคืนสต็อก (ย้อนกลับไม่ได้)
+            </p>
+          </div>
+        </div>
+
+        {/* กู้คืนสินค้าที่ลบ */}
+        <div className="card p-6 border-blue-200">
+          <div className="flex items-center gap-3 mb-6">
+            <div className="w-12 h-12 bg-blue-600 rounded-xl flex items-center justify-center text-white">
+              <ArchiveRestore size={24} />
+            </div>
+            <div>
+              <h2 className="text-xl font-bold">กู้คืนสินค้า</h2>
+              <p className="text-gray-500 text-sm">กู้คืนสินค้าที่ลบไปแล้ว</p>
+            </div>
+          </div>
+          <div className="space-y-3">
+            <button
+              type="button"
+              onClick={() => window.location.href = '/settings/archived'}
+              className="btn w-full flex items-center justify-center gap-2 text-white bg-blue-600 hover:bg-blue-700"
+            >
+              <ArchiveRestore size={16} />
+              จัดการสินค้าที่ลบ
+            </button>
+            <p className="text-xs text-gray-400">
+              ดูและกู้คืนสินค้าที่ลบไปแล้ว
             </p>
           </div>
         </div>

@@ -23,8 +23,8 @@ export async function getDashboardStats(): Promise<{
     `SELECT
        (SELECT COALESCE(SUM(net_amount), 0) FROM transactions WHERE status = 'completed' AND DATE(created_at) = CURDATE()) as todaySales,
        (SELECT COUNT(*) FROM transactions WHERE status = 'completed' AND DATE(created_at) = CURDATE()) as todayOrders,
-       (SELECT COUNT(*) FROM products WHERE is_active = TRUE) as totalProducts,
-       (SELECT COUNT(*) FROM inventory i JOIN products p ON i.product_id = p.id WHERE i.quantity <= i.min_stock AND p.is_active = TRUE) as lowStockCount`
+       (SELECT COUNT(*) FROM products WHERE is_active = TRUE AND is_deleted = FALSE) as totalProducts,
+       (SELECT COUNT(*) FROM inventory i JOIN products p ON i.product_id = p.id WHERE i.quantity <= i.min_stock AND p.is_active = TRUE AND p.is_deleted = FALSE) as lowStockCount`
   );
 
   const stats = (rows as {

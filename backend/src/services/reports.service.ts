@@ -179,7 +179,7 @@ export async function getInventoryReport(): Promise<{
        SUM(CASE WHEN i.quantity = 0 THEN 1 ELSE 0 END) as outOfStockCount
      FROM products p
      JOIN inventory i ON p.id = i.product_id
-     WHERE p.is_active = TRUE`
+     WHERE p.is_active = TRUE AND p.is_deleted = FALSE`
   );
 
   const summary = (summaryRows as {
@@ -198,7 +198,7 @@ export async function getInventoryReport(): Promise<{
      FROM products p
      JOIN inventory i ON p.id = i.product_id
      LEFT JOIN categories c ON p.category_id = c.id
-     WHERE p.is_active = TRUE
+     WHERE p.is_active = TRUE AND p.is_deleted = FALSE
      GROUP BY c.name
      ORDER BY value DESC`
   );

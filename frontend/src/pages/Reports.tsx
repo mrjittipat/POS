@@ -13,10 +13,8 @@ function getLocalDateString(date: Date): string {
 }
 
 export default function Reports() {
-  const [startDate, setStartDate] = useState(() => {
-    const d = new Date(Date.now() - 30 * 24 * 60 * 60 * 1000);
-    return getLocalDateString(d);
-  });
+  // Default แสดง "วันนี้" (เลือกวันที่อื่นได้จาก date picker)
+  const [startDate, setStartDate] = useState(() => getLocalDateString(new Date()));
   const [endDate, setEndDate] = useState(() => getLocalDateString(new Date()));
   const [groupBy, setGroupBy] = useState<'day' | 'month' | 'year'>('day');
   const [salesData, setSalesData] = useState<{

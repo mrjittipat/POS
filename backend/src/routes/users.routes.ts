@@ -7,12 +7,12 @@ import { validate } from '../middleware/validation.middleware';
 
 const router = Router();
 
-router.get('/', authMiddleware, roleMiddleware('admin'), usersController.getUsers);
+router.get('/', authMiddleware, roleMiddleware('admin', 'manager'), usersController.getUsers);
 
 router.post(
   '/',
   authMiddleware,
-  roleMiddleware('admin'),
+  roleMiddleware('admin', 'manager'),
   validate([
     body('username').notEmpty().withMessage('กรุณาระบุชื่อผู้ใช้'),
     body('password').isLength({ min: 6 }).withMessage('รหัสผ่านต้องมีอย่างน้อย 6 ตัวอักษร'),
@@ -22,13 +22,13 @@ router.post(
   usersController.createUser
 );
 
-router.put('/:id', authMiddleware, roleMiddleware('admin'), usersController.updateUser);
-router.delete('/:id', authMiddleware, roleMiddleware('admin'), usersController.deleteUser);
+router.put('/:id', authMiddleware, roleMiddleware('admin', 'manager'), usersController.updateUser);
+router.delete('/:id', authMiddleware, roleMiddleware('admin', 'manager'), usersController.deleteUser);
 
 router.put(
   '/:id/reset-password',
   authMiddleware,
-  roleMiddleware('admin'),
+  roleMiddleware('admin', 'manager'),
   validate([
     body('oldPassword').notEmpty().withMessage('กรุณาระบุรหัสผ่านเดิม'),
     body('newPassword').isLength({ min: 6 }).withMessage('รหัสผ่านใหม่ต้องมีอย่างน้อย 6 ตัวอักษร'),

@@ -111,6 +111,35 @@ export async function changePassword(req: Request, res: Response): Promise<void>
   }
 }
 
+// PUT /api/auth/profile
+export async function updateProfile(req: Request, res: Response): Promise<void> {
+  try {
+    const { full_name, phone } = req.body;
+
+    const user = await authService.updateProfile(req.user!.userId, full_name, phone);
+
+    if (!user) {
+      res.status(404).json({
+        success: false,
+        message: 'ไม่พบข้อมูลผู้ใช้',
+      });
+      return;
+    }
+
+    res.json({
+      success: true,
+      message: 'อัปเดตโปรไฟล์สำเร็จ',
+      data: user,
+    });
+  } catch (error) {
+    console.error('Update profile error:', error);
+    res.status(500).json({
+      success: false,
+      message: 'เกิดข้อผิดพลาดในการอัปเดตโปรไฟล์',
+    });
+  }
+}
+
 // GET /api/auth/me
 export async function getMe(req: Request, res: Response): Promise<void> {
   try {

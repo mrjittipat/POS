@@ -5,7 +5,7 @@
 @layer base {
   body {
     @apply bg-gray-50 text-gray-900 antialiased;
-    font-family: 'Sarabun', 'Noto Sans Thai', system-ui, sans-serif;
+    font-family: 'Chakra Petch', sans-serif;
   }
 }
 
@@ -30,6 +30,14 @@
   }
   .card {
     @apply bg-white rounded-xl shadow-sm border border-gray-100;
+  }
+  /* ซ่อน scrollbar แต่ยังเลื่อนได้ */
+  .scrollbar-hide {
+    scrollbar-width: none; /* Firefox */
+    -ms-overflow-style: none; /* IE/Edge */
+  }
+  .scrollbar-hide::-webkit-scrollbar {
+    display: none; /* Chrome/Safari/Edge */
   }
 }
 

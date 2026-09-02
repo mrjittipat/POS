@@ -24,6 +24,7 @@ export interface CheckoutRequest {
 
 export const posApi = {
   checkout: (data: CheckoutRequest) => api.post('/pos/checkout', data),
+  resetSales: (scope: 'today' | 'all' = 'today') => api.post('/pos/reset-sales', { scope }),
   getTransactions: (page = 1, limit = 20, startDate?: string, endDate?: string) =>
     api.get(`/pos/transactions?page=${page}&limit=${limit}${startDate ? `&start_date=${startDate}` : ''}${endDate ? `&end_date=${endDate}` : ''}`),
   getTransactionById: (id: number) => api.get(`/pos/transactions/${id}`),

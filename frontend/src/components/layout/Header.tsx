@@ -1,18 +1,23 @@
-import { useEffect, useRef } from 'react';
-import { Bell, Trash2, ShoppingBag } from 'lucide-react';
+import { useEffect, useRef, useState } from 'react';
+import { Bell, Trash2, ShoppingBag, Settings, LogOut, ChevronDown } from 'lucide-react';
+import { useNavigate } from 'react-router-dom';
 import { useAuthStore } from '../../store';
 import { useNotificationStore } from '../../store/notifications';
 import { posApi } from '../../api/pos.api';
 import { formatCurrency } from '../../utils/format';
+import Avatar from '../Avatar';
 
 interface HeaderProps {
   title: string;
 }
 
 export default function Header({ title }: HeaderProps) {
-  const { user } = useAuthStore();
+  const { user, logout } = useAuthStore();
   const { items, isOpen, setItems, clearItems, toggleOpen, setOpen } = useNotificationStore();
+  const navigate = useNavigate();
   const dropdownRef = useRef<HTMLDivElement>(null);
+  const profileRef = useRef<HTMLDivElement>(null);
+  const [profileOpen, setProfileOpen] = useState(false);
 
   const hasNotifications = items.length > 0;
 
@@ -21,16 +26,24 @@ export default function Header({ title }: HeaderProps) {
     fetchTodaySold();
   }, []);
 
-  // Close dropdown when clicking outside
+  // Close dropdowns when clicking outside
   useEffect(() => {
     const handleClickOutside = (e: MouseEvent) => {
       if (dropdownRef.current && !dropdownRef.current.contains(e.target as Node)) {
         setOpen(false);
       }
+      if (profileRef.current && !profileRef.current.contains(e.target as Node)) {
+        setProfileOpen(false);
+      }
     };
     document.addEventListener('mousedown', handleClickOutside);
     return () => document.removeEventListener('mousedown', handleClickOutside);
   }, [setOpen]);
+
+  const handleLogout = () => {
+    logout();
+    navigate('/login');
+  };
 
   const fetchTodaySold = async () => {
     try {
@@ -112,15 +125,56 @@ export default function Header({ title }: HeaderProps) {
             )}
           </div>
 
-          {/* User avatar */}
-          <div className="flex items-center gap-3">
-            <div className="w-9 h-9 bg-primary-600 rounded-full flex items-center justify-center text-white font-bold">
-              {user?.full_name?.charAt(0) || 'U'}
-            </div>
-            <div className="hidden md:block">
-              <p className="font-medium text-sm">{user?.full_name}</p>
-              <p className="text-gray-500 text-xs">{user?.username}</p>
-            </div>
+          {/* User avatar / profile dropdown */}
+          <div className="relative" ref={profileRef}>
+            <button
+              onClick={() => setProfileOpen((v) => !v)}
+              className="flex items-center gap-3 rounded-lg p-2 hover:bg-gray-100 transition-colors"
+            >
+              <Avatar userId={user?.id} name={user?.full_name} className="w-9 h-9 text-sm" />
+              <div className="hidden md:block text-left">
+                <p className="font-medium text-sm text-gray-800">{user?.full_name}</p>
+                <p className="text-gray-500 text-xs">{user?.username}</p>
+              </div>
+              <ChevronDown size={16} className={`hidden md:block text-gray-400 transition-transform ${profileOpen ? 'rotate-180' : ''}`} />
+            </button>
+
+            {/* Profile dropdown menu */}
+            {profileOpen && (
+              <ul className="absolute right-0 top-full mt-2 w-56 bg-white rounded-xl shadow-2xl border border-gray-200 z-50 overflow-hidden divide-y divide-gray-100">
+                <li className="px-4 py-3 bg-gray-50 flex items-center gap-3">
+                  <Avatar userId={user?.id} name={user?.full_name} className="w-9 h-9 text-sm" />
+                  <div className="min-w-0">
+                    <p className="text-sm font-semibold text-gray-800 truncate">{user?.full_name}</p>
+                    <p className="text-xs text-gray-500 truncate">@{user?.username}</p>
+                  </div>
+                </li>
+                <li>
+                  <button
+                    onClick={() => {
+                      setProfileOpen(false);
+                      navigate('/profile');
+                    }}
+                    className="w-full flex items-center gap-3 px-4 py-3 text-sm text-gray-700 hover:bg-gray-50 transition-colors"
+                  >
+                    <Settings size={16} className="text-gray-400" />
+                    การตั้งค่าโปรไฟล์
+                  </button>
+                </li>
+                <li>
+                  <button
+                    onClick={() => {
+                      setProfileOpen(false);
+                      handleLogout();
+                    }}
+                    className="w-full flex items-center gap-3 px-4 py-3 text-sm text-red-600 hover:bg-red-50 transition-colors"
+                  >
+                    <LogOut size={16} />
+                    ออกจากระบบ
+                  </button>
+                </li>
+              </ul>
+            )}
           </div>
         </div>
       </div>

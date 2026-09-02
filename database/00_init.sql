@@ -26,6 +26,7 @@ CREATE TABLE IF NOT EXISTS categories (
     id INT AUTO_INCREMENT PRIMARY KEY,
     name VARCHAR(100) NOT NULL,
     description TEXT,
+    is_active BOOLEAN NOT NULL DEFAULT TRUE,
     created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
     updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
     INDEX idx_name (name)
@@ -43,6 +44,7 @@ CREATE TABLE IF NOT EXISTS products (
     cost DECIMAL(10, 2) NOT NULL DEFAULT 0.00,
     unit VARCHAR(50) DEFAULT 'ชิ้น',
     is_active BOOLEAN NOT NULL DEFAULT TRUE,
+    is_deleted BOOLEAN NOT NULL DEFAULT FALSE,
     created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
     updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
     FOREIGN KEY (category_id) REFERENCES categories(id) ON DELETE SET NULL,
@@ -50,7 +52,8 @@ CREATE TABLE IF NOT EXISTS products (
     INDEX idx_sku (sku),
     INDEX idx_barcode (barcode),
     INDEX idx_name (name),
-    INDEX idx_active (is_active)
+    INDEX idx_active (is_active),
+    INDEX idx_deleted (is_deleted)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
 
 -- 004_create_inventory
@@ -207,3 +210,23 @@ INSERT INTO settings (`key`, `value`, description) VALUES
 ('receipt_footer', 'ขอบคุณที่ใช้บริการ', 'ข้อความท้ายใบเสร็จ'),
 ('currency', 'THB', 'สกุลเงิน'),
 ('timezone', 'Asia/Bangkok', 'เขตเวลา');
+
+-- Create products_archived table
+CREATE TABLE IF NOT EXISTS products_archived (
+    id INT PRIMARY KEY,
+    category_id INT,
+    name VARCHAR(200) NOT NULL,
+    sku VARCHAR(50),
+    barcode VARCHAR(50),
+    image_url VARCHAR(500),
+    price DECIMAL(10, 2) NOT NULL DEFAULT 0.00,
+    cost DECIMAL(10, 2) NOT NULL DEFAULT 0.00,
+    unit VARCHAR(50) DEFAULT 'ชิ้น',
+    is_active BOOLEAN NOT NULL DEFAULT TRUE,
+    created_at TIMESTAMP NULL,
+    updated_at TIMESTAMP NULL,
+    deleted_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+    deleted_by INT,
+    INDEX idx_name (name),
+    INDEX idx_deleted_at (deleted_at)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;

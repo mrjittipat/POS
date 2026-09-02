@@ -11,8 +11,10 @@ export async function getUsers(req: Request, res: Response): Promise<void> {
   try {
     const page = parseInt(req.query.page as string) || 1;
     const limit = parseInt(req.query.limit as string) || 20;
+    // manager มองเห็นได้เฉพาะพนักงานขาย
+    const role = req.user!.role === 'manager' ? 'cashier' : undefined;
 
-    const { users, total } = await usersService.getUsers(page, limit);
+    const { users, total } = await usersService.getUsers(page, limit, role);
 
     res.json({
       success: true,
@@ -34,12 +36,14 @@ export async function getUsers(req: Request, res: Response): Promise<void> {
 export async function createUser(req: Request, res: Response): Promise<void> {
   try {
     const { username, password, full_name, role, phone } = req.body;
+    // manager สร้างได้เฉพาะพนักงานขาย
+    const finalRole = req.user!.role === 'manager' ? 'cashier' : role;
 
     const id = await usersService.createUser({
       username,
       password,
       full_name,
-      role,
+      role: finalRole,
       phone,
     });
 
@@ -65,12 +69,17 @@ export async function updateUser(req: Request, res: Response): Promise<void> {
     const id = parseInt(req.params.id, 10);
     const { full_name, role, phone, is_active } = req.body;
 
-    const success = await usersService.updateUser(id, {
-      full_name,
-      role,
-      phone,
-      is_active,
-    });
+    const actorIsManager = req.user!.role === 'manager';
+    const success = await usersService.updateUser(
+      id,
+      {
+        full_name,
+        role,
+        phone,
+        is_active,
+      },
+      actorIsManager
+    );
 
     if (!success) {
       res.status(404).json({ success: false, message: 'ไม่พบผู้ใช้งาน' });
@@ -95,7 +104,8 @@ export async function deleteUser(req: Request, res: Response): Promise<void> {
       return;
     }
 
-    const success = await usersService.deleteUser(id);
+    const actorIsManager = req.user!.role === 'manager';
+    const success = await usersService.deleteUser(id, actorIsManager);
 
     if (!success) {
       res.status(404).json({ success: false, message: 'ไม่พบผู้ใช้งาน' });
@@ -124,7 +134,8 @@ export async function resetPassword(req: Request, res: Response): Promise<void> 
       return;
     }
 
-    const result = await usersService.resetPassword(id, oldPassword, newPassword);
+    const actorIsManager = req.user!.role === 'manager';
+    const result = await usersService.resetPassword(id, oldPassword, newPassword, actorIsManager);
 
     if (!result.success) {
       res.status(400).json({ success: false, message: result.message });

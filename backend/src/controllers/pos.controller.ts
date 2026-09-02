@@ -23,6 +23,23 @@ export async function checkout(req: Request, res: Response): Promise<void> {
   }
 }
 
+// POST /api/pos/reset-sales  (scope: 'today' | 'all')
+export async function resetSales(req: Request, res: Response): Promise<void> {
+  try {
+    const scope: 'today' | 'all' = req.body?.scope === 'all' ? 'all' : 'today';
+    const result = await posService.resetSales(req.user!.userId, scope);
+    const label = scope === 'all' ? 'ทั้งหมด' : 'วันนี้';
+    res.json({
+      success: true,
+      message: `รีเซ็ตยอดขาย${label}แล้ว (${result.deleted} บิล)`,
+      data: { ...result, scope },
+    });
+  } catch (error) {
+    console.error('Reset sales error:', error);
+    res.status(500).json({ success: false, message: 'เกิดข้อผิดพลาดในการรีเซ็ตยอดขาย' });
+  }
+}
+
 // GET /api/pos/transactions
 export async function getTransactions(req: Request, res: Response): Promise<void> {
   try {

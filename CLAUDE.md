@@ -84,17 +84,20 @@ pos-system/
 - **Default user**: admin / admin123 (seed จาก database/00_init.sql)
 
 ## Docker
+> ⚠️ ทุกคำสั่ง docker-compose ต้องใส่ `--env-file .env.docker` **ไม่งั้นจะใช้ `.env` (DB_HOST=127.0.0.1)** ซึ่ง backend ใน container เชื่อม MySQL ไม่ได้ (ต้องใช้ host `mysql`)
+
 ```bash
-docker-compose up --build          # rebuild + start all
-docker-compose up -d              # start existing
-docker-compose down               # stop
+docker-compose --env-file .env.docker up --build   # rebuild + start all
+docker-compose --env-file .env.docker up -d        # start existing
+docker-compose --env-file .env.docker down         # stop
 ```
 - Frontend: port 80, Backend: port 3000, MySQL: port 3306
-- phpMyAdmin: port 8080 (dev profile)
+- phpMyAdmin: port 8080 (dev profile: `docker-compose --env-file .env.docker --profile dev up -d`)
+- `.env` เก็บค่า dev local (XAMPP, DB_HOST=127.0.0.1) — อย่าใช้กับ Docker
 
 ## แก้ไขโค้ดแล้วต้อง
 ```bash
-docker-compose build --no-cache backend frontend
-docker-compose up -d --force-recreate backend frontend
+docker-compose --env-file .env.docker build --no-cache backend frontend
+docker-compose --env-file .env.docker up -d --force-recreate backend frontend
 ```
 เพราะ Docker cache ถ้าไม่ใส่ `--no-cache` จะยังใช้ build เก่า

@@ -128,6 +128,83 @@ export async function checkout(
   }
 }
 
+// Reset sales — ลบบิล (completed) และคืนสต็อก ตาม scope: 'today' (วันนี้) หรือ 'all' (ทั้งหมดทุกวัน)
+export async function resetSales(
+  userId: number,
+  scope: 'today' | 'all' = 'today'
+): Promise<{ deleted: number; restoredItems: number; cashReset: number; transactionCodes: string[] }> {
+  const connection = await pool.getConnection();
+
+  try {
+    await connection.beginTransaction();
+
+    const dateClause = scope === 'today' ? " AND DATE(created_at) = CURDATE()" : '';
+    const [rows] = await connection.execute(
+      `SELECT id, transaction_code FROM transactions WHERE status = 'completed'${dateClause}`
+    );
+    const bills = rows as { id: number; transaction_code: string }[];
+
+    // ยอดเงินสดทั้งหมดจากบิลที่จะลบ (สำหรับหักออกจากเงินพัก/ลิ้นชัก)
+    let cashReset = 0;
+    const billIds = bills.map((b) => b.id);
+    if (billIds.length > 0) {
+      const placeholders = billIds.map(() => '?').join(',');
+      const [cashRows] = await connection.execute(
+        `SELECT COALESCE(SUM(p.amount), 0) AS cashTotal
+         FROM payments p
+         WHERE p.transaction_id IN (${placeholders}) AND p.method = 'cash'`,
+        billIds
+      );
+      cashReset = Number((cashRows as { cashTotal: number }[])[0]?.cashTotal || 0);
+    }
+
+    let restoredItems = 0;
+    for (const t of bills) {
+      const [itemRows] = await connection.execute(
+        'SELECT product_id, quantity FROM transaction_items WHERE transaction_id = ?',
+        [t.id]
+      );
+      const items = itemRows as { product_id: number; quantity: number }[];
+
+      for (const it of items) {
+        // คืนสต็อก
+        await connection.execute(
+          'UPDATE inventory SET quantity = quantity + ? WHERE product_id = ?',
+          [it.quantity, it.product_id]
+        );
+        // บันทึก log คืนสต็อก
+        const [invRows] = await connection.execute(
+          'SELECT quantity FROM inventory WHERE product_id = ?',
+          [it.product_id]
+        );
+        const afterQty = (invRows as { quantity: number }[])[0]?.quantity || 0;
+        await connection.execute(
+          `INSERT INTO inventory_logs (product_id, type, quantity, before_qty, after_qty, reason, user_id)
+           VALUES (?, 'in', ?, ?, ?, ?, ?)`,
+          [it.product_id, it.quantity, Math.max(afterQty - it.quantity, 0), afterQty, `รีเซ็ตยอดขาย #${t.id}`, userId]
+        );
+        restoredItems += it.quantity;
+      }
+
+      // ลบ transaction → cascade ลบ transaction_items และ payments
+      await connection.execute('DELETE FROM transactions WHERE id = ?', [t.id]);
+    }
+
+    await connection.commit();
+    return {
+      deleted: bills.length,
+      restoredItems,
+      cashReset,
+      transactionCodes: bills.map((b) => b.transaction_code).filter((c) => !!c),
+    };
+  } catch (error) {
+    await connection.rollback();
+    throw error;
+  } finally {
+    connection.release();
+  }
+}
+
 // Get transactions with pagination
 export async function getTransactions(
   page: number = 1,

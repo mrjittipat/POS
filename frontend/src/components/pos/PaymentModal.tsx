@@ -1,14 +1,15 @@
 import { useState, useRef } from 'react';
-import { X, Banknote, Smartphone, ImagePlus, CheckCircle } from 'lucide-react';
+import { X, Banknote, Smartphone, CheckCircle } from 'lucide-react';
 import type { CartItem } from '../../api/pos.api';
 import { formatCurrency } from '../../utils/format';
+import { usePromptPay } from '../../hooks/usePromptPay';
 
 interface PaymentModalProps {
   open: boolean;
   items: CartItem[];
   vatRate: number;
   onClose: () => void;
-  onSubmit: (method: 'cash' | 'promptpay', netAmount: number) => Promise<void>;
+  onSubmit: (method: 'cash' | 'promptpay', netAmount: number, reference?: string) => Promise<void>;
 }
 
 export default function PaymentModal({ open, items, vatRate, onClose, onSubmit }: PaymentModalProps) {
@@ -16,9 +17,8 @@ export default function PaymentModal({ open, items, vatRate, onClose, onSubmit }
   const [processing, setProcessing] = useState(false);
   const [cashReceived, setCashReceived] = useState<number | ''>('');
   const cashInputRef = useRef<HTMLInputElement>(null);
-  const [qrImageUrl, setQrImageUrl] = useState<string | null>(() =>
-    localStorage.getItem('payment.promptpay_qr')
-  );
+  const [paidTxId, setPaidTxId] = useState<string | null>(null);
+  const promptpay = usePromptPay({ onPaid: (txId) => setPaidTxId(txId) });
 
   if (!open) return null;
 
@@ -34,23 +34,43 @@ export default function PaymentModal({ open, items, vatRate, onClose, onSubmit }
     setCashReceived('');
     if (method === 'cash') {
       setTimeout(() => cashInputRef.current?.focus(), 100);
+      promptpay.reset();
+      setPaidTxId(null);
+    } else {
+      // QR แบบ dynamic: สร้าง QR ตามยอดบิลทันที (ข้ามถ้าโหมดสำรอง — ใช้รูปอัปโหลด)
+      setPaidTxId(null);
+      const qrMode = (localStorage.getItem('payment.qr_mode') as 'auto' | 'manual') || 'auto';
+      if (qrMode === 'auto') {
+        void promptpay.start(netAmount);
+      }
     }
-    setQrImageUrl(localStorage.getItem('payment.promptpay_qr'));
   };
 
   const backToMethods = () => {
     setSelectedMethod(null);
     setCashReceived('');
+    promptpay.reset();
+    setPaidTxId(null);
   };
 
   const submit = async () => {
     if (!selectedMethod) return;
     if (selectedMethod === 'cash' && !isSufficient) return;
+    // QR: โหมดอัตโนมัติกันกดยืนยันก่อนลูกค้าโอนเงินจริง | โหมดสำรองให้พนักงานเห็นเงินแล้วกดเอง
+    const isManualQr = selectedMethod === 'promptpay'
+      && ((localStorage.getItem('payment.qr_mode') as 'auto' | 'manual') || 'auto') === 'manual';
+    if (selectedMethod === 'promptpay' && !isManualQr && (promptpay.status !== 'paid' || !promptpay.qr)) return;
     setProcessing(true);
     try {
-      await onSubmit(selectedMethod, netAmount);
+      await onSubmit(
+        selectedMethod,
+        netAmount,
+        selectedMethod === 'promptpay' ? (isManualQr ? 'MANUAL' : (paidTxId ?? promptpay.qr?.transactionId)) : undefined
+      );
       setSelectedMethod(null);
       setCashReceived('');
+      promptpay.reset();
+      setPaidTxId(null);
     } finally {
       setProcessing(false);
     }
@@ -204,32 +224,58 @@ export default function PaymentModal({ open, items, vatRate, onClose, onSubmit }
                 ← เลือกช่องทางอื่น
               </button>
               <div className="flex flex-col items-center">
-                {qrImageUrl ? (
+                {((localStorage.getItem('payment.qr_mode') as 'auto' | 'manual') || 'auto') === 'manual' ? (
+                  localStorage.getItem('payment.promptpay_qr') ? (
+                    <div className="w-56 h-56 rounded-2xl border-2 border-amber-200 overflow-hidden bg-white shadow-inner">
+                      <img src={localStorage.getItem('payment.promptpay_qr')!} alt="QR สำรอง" className="w-full h-full object-contain" />
+                    </div>
+                  ) : (
+                    <div className="w-56 h-56 rounded-2xl border-2 border-dashed border-amber-300 flex flex-col items-center justify-center bg-amber-50/50">
+                      <p className="text-sm text-amber-500 text-center px-4">ยังไม่มีรูป QR สำรอง<br />อัปโหลดในตั้งค่า</p>
+                    </div>
+                  )
+                ) : promptpay.loading ? (
+                  <div className="w-56 h-56 rounded-2xl border-2 border-dashed border-blue-300 flex flex-col items-center justify-center bg-blue-50/50">
+                    <span className="w-10 h-10 rounded-full border-4 border-blue-300 border-t-blue-600 animate-spin mb-2" />
+                    <p className="text-sm text-blue-500">กำลังสร้าง QR...</p>
+                  </div>
+                ) : promptpay.error ? (
+                  <div className="w-56 rounded-2xl border-2 border-dashed border-red-300 flex flex-col items-center justify-center bg-red-50/50 px-4 py-8">
+                    <p className="text-sm text-red-500 text-center">{promptpay.error || 'สร้าง QR ไม่สำเร็จ'}</p>
+                    <button
+                      type="button"
+                      onClick={() => promptpay.start(netAmount)}
+                      className="mt-3 px-4 py-2 rounded-lg bg-red-600 text-white text-sm font-bold hover:bg-red-700"
+                    >
+                      ลองใหม่
+                    </button>
+                  </div>
+                ) : promptpay.qr ? (
                   <div className="w-56 h-56 rounded-2xl border-2 border-gray-200 overflow-hidden bg-white shadow-inner">
-                    <img src={qrImageUrl} alt="PromptPay QR" className="w-full h-full object-contain" />
+                    <img src={promptpay.qr.qrCode} alt="PromptPay QR" className="w-full h-full object-contain" />
                   </div>
-                ) : (
-                  <div className="w-56 h-56 rounded-2xl border-2 border-dashed border-gray-300 flex flex-col items-center justify-center bg-gray-50">
-                    <ImagePlus size={40} className="text-gray-300 mb-2" />
-                    <p className="text-sm text-gray-400">ไม่มี QR Code</p>
-                    <p className="text-xs text-gray-400 mt-1">ไปที่ตั้งค่า → อัพโหลด QR</p>
-                  </div>
-                )}
+                ) : null}
                 <p className="text-sm text-gray-500 mt-3">ให้ลูกค้าสแกน QR Code เพื่อชำระเงิน</p>
+                {((localStorage.getItem('payment.qr_mode') as 'auto' | 'manual') || 'auto') === 'manual' && (
+                  <p className="mt-2 text-sm font-bold text-amber-600">โหมดสำรอง — เห็นเงินเข้าแล้วกดยืนยันเอง</p>
+                )}
+                {promptpay.status === 'paid' && (
+                  <p className="mt-2 text-sm font-bold text-green-600 flex items-center gap-1">
+                    <CheckCircle size={16} /> ได้รับเงินแล้ว
+                  </p>
+                )}
               </div>
               <button
                 onClick={submit}
-                disabled={processing}
-                className={`w-full py-3 px-4 rounded-xl font-bold text-lg transition-all ${
-                  !processing ? 'bg-blue-600 text-white hover:bg-blue-700 shadow-lg shadow-blue-600/25' : 'bg-blue-400 text-white cursor-wait'
-                }`}
+                disabled={processing || (((localStorage.getItem('payment.qr_mode') as 'auto' | 'manual') || 'auto') === 'manual' ? !localStorage.getItem('payment.promptpay_qr') : promptpay.status !== 'paid')}
+                className="w-full py-3 px-4 rounded-xl font-bold text-lg transition-all bg-blue-600 text-white hover:bg-blue-700 shadow-lg shadow-blue-600/25 disabled:bg-gray-200 disabled:text-gray-400 disabled:shadow-none disabled:cursor-not-allowed"
               >
                 {processing ? (
                   'กำลังประมวลผล...'
                 ) : (
                   <span className="flex items-center justify-center gap-2">
                     <CheckCircle size={20} />
-                    ชำระเงินแล้ว
+                    {promptpay.status === 'paid' ? 'ยืนยันการชำระเงิน' : 'รอการโอนเงิน...'}
                   </span>
                 )}
               </button>

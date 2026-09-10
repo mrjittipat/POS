@@ -19,6 +19,8 @@ import dashboardRoutes from './routes/dashboard.routes';
 import barcodeRoutes from './routes/barcode.routes';
 import migrationRoutes from './routes/migration.routes';
 import productImagesRoutes from './routes/productImages.routes';
+import promptpayRoutes from './routes/promptpay.routes';
+import { startAutoCheck } from './services/promptpay.service';
 
 /**
  * Express Application Setup
@@ -35,8 +37,15 @@ app.use(
   })
 );
 
-// Body parsing
-app.use(express.json({ limit: '10mb' }));
+// Body parsing (เก็บ rawBody ไว้ verify Paynoi webhook HMAC)
+app.use(
+  express.json({
+    limit: '10mb',
+    verify: (req, _res, buf) => {
+      (req as express.Request & { rawBody?: string }).rawBody = buf.toString();
+    },
+  })
+);
 app.use(express.urlencoded({ extended: true }));
 
 // Static files (uploads)
@@ -66,6 +75,10 @@ app.use('/api/dashboard', dashboardRoutes);
 app.use('/api/barcode', barcodeRoutes);
 app.use('/api/migration', migrationRoutes);
 app.use('/api/product-images', productImagesRoutes);
+app.use('/api/promptpay', promptpayRoutes);
+
+// Auto-check ยอดโอน Paynoi ทุก 10 วิ (เริ่มเฉพาะเมื่อตั้งค่า key ครบ)
+startAutoCheck();
 
 // 404 handler
 app.use((_req, res) => {

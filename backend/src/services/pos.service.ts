@@ -1,5 +1,6 @@
 import pool from '../config/database';
 import { Transaction, TransactionItem, Payment, CartItem, CheckoutRequest } from '../models/types';
+import { verifyAndConsumeOrder } from './promptpay.service';
 import { generateTransactionCode } from '../utils/barcode.util';
 
 /**
@@ -107,6 +108,18 @@ export async function checkout(
           userId,
         ]
       );
+    }
+
+    // ตรวจ PromptPay: ถ้าจ่ายด้วย promptpay แบบ dynamic QR ต้องมี reference
+    // ที่ผ่านการยืนยันว่าโอนแล้ว (กันกดปิดบิลโดยยังไม่โอน)
+    for (const payment of data.payments) {
+      if (payment.method === 'promptpay' && payment.reference) {
+        const result = await verifyAndConsumeOrder(payment.reference, Number(payment.amount));
+        if (!result.ok) {
+          await connection.rollback();
+          throw new Error(result.message);
+        }
+      }
     }
 
     // Record payments

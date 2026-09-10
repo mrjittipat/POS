@@ -1,5 +1,5 @@
-import { useState, useRef, useEffect } from 'react';
-import { Save, Store, ImagePlus, Trash2, CreditCard, RefreshCw, ArchiveRestore } from 'lucide-react';
+import { useState, useEffect } from 'react';
+import { Save, Store, Trash2, CreditCard, RefreshCw, ArchiveRestore, QrCode } from 'lucide-react';
 import { useDialog } from '../context/DialogContext';
 import { posApi } from '../api/pos.api';
 import { deductDrawerMoney, removeDrawerLogsByRef } from '../utils/posStorage';
@@ -52,20 +52,19 @@ export default function Settings() {
   });
   const [saved, setSaved] = useState(false);
 
-  // PromptPay QR state
-  const [qrPreview, setQrPreview] = useState<string | null>(null);
-  const [_qrFile, setQrFile] = useState<File | null>(null);
-  const qrInputRef = useRef<HTMLInputElement>(null);
+  // โหมด QR: auto = เจนตามยอดผ่าน Paynoi | manual = รูปที่อัปโหลดเอง (สำรองตอน Paynoi ล่ม)
+  const [qrMode, setQrMode] = useState<'auto' | 'manual'>(
+    () => (localStorage.getItem('payment.qr_mode') as 'auto' | 'manual') || 'auto'
+  );
+  const [manualQr, setManualQr] = useState<string | null>(() =>
+    localStorage.getItem('payment.promptpay_qr')
+  );
 
   // Load saved settings and QR on mount
   useEffect(() => {
     const savedSettings = localStorage.getItem('settings');
     if (savedSettings) {
       setSettings(JSON.parse(savedSettings));
-    }
-    const savedQr = localStorage.getItem('payment.promptpay_qr');
-    if (savedQr) {
-      setQrPreview(savedQr);
     }
   }, []);
 
@@ -77,44 +76,41 @@ export default function Settings() {
     setTimeout(() => setSaved(false), 3000);
   };
 
-  const handleQrChange = (e: React.ChangeEvent<HTMLInputElement>) => {
+  const handleQrModeChange = (mode: 'auto' | 'manual') => {
+    setQrMode(mode);
+    localStorage.setItem('payment.qr_mode', mode);
+    toast({
+      message: mode === 'auto' ? 'ใช้ QR อัตโนมัติ (Paynoi)' : 'ใช้ QR สำรองที่อัปโหลดเอง',
+      type: 'success',
+    });
+  };
+
+  const handleManualQrChange = (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];
     if (!file) return;
-
-    // Validate file type
-    if (!['image/jpeg', 'image/png'].includes(file.type)) {
-      toast({ message: 'รองรับเฉพาะไฟล์ JPG และ PNG เท่านั้น', type: 'error' });
+    if (!['image/png', 'image/jpeg'].includes(file.type)) {
+      toast({ message: 'ใช้ได้เฉพาะไฟล์ PNG/JPG', type: 'error' });
       return;
     }
-
-    // Validate file size (5MB)
-    if (file.size > 5 * 1024 * 1024) {
-      toast({ message: 'ขนาดไฟล์ต้องไม่เกิน 5MB', type: 'error' });
+    if (file.size > 2 * 1024 * 1024) {
+      toast({ message: 'ไฟล์ใหญ่เกิน 2MB', type: 'error' });
       return;
     }
-
-    setQrFile(file);
-
-    // Create preview
     const reader = new FileReader();
-    reader.onloadend = () => {
-      const result = reader.result as string;
-      setQrPreview(result);
-      // Save to localStorage immediately
-      localStorage.setItem('payment.promptpay_qr', result);
-      toast({ message: 'อัพโหลด QR Code สำเร็จ', type: 'success' });
+    reader.onload = () => {
+      const dataUrl = reader.result as string;
+      setManualQr(dataUrl);
+      localStorage.setItem('payment.promptpay_qr', dataUrl);
+      toast({ message: 'อัปโหลด QR สำรองแล้ว', type: 'success' });
     };
     reader.readAsDataURL(file);
+    e.target.value = '';
   };
 
   const handleRemoveQr = () => {
-    setQrPreview(null);
-    setQrFile(null);
     localStorage.removeItem('payment.promptpay_qr');
-    if (qrInputRef.current) {
-      qrInputRef.current.value = '';
-    }
-    toast({ message: 'ลบ QR Code แล้ว', type: 'success' });
+    setManualQr(null);
+    toast({ message: 'ลบ QR สำรองแล้ว', type: 'success' });
   };
 
   return (
@@ -267,65 +263,113 @@ export default function Settings() {
         </div>
 
         <div className="space-y-5">
+          {/* สวิตช์โหมด QR */}
+          <div className="grid grid-cols-2 gap-2 p-1 bg-gray-100 rounded-xl">
+            <button
+              type="button"
+              onClick={() => handleQrModeChange('auto')}
+              className={`py-2.5 px-3 rounded-lg text-sm font-bold transition-all ${
+                qrMode === 'auto'
+                  ? 'bg-white text-blue-700 shadow'
+                  : 'text-gray-500 hover:text-gray-700'
+              }`}
+            >
+              QR อัตโนมัติ (Paynoi)
+            </button>
+            <button
+              type="button"
+              onClick={() => handleQrModeChange('manual')}
+              className={`py-2.5 px-3 rounded-lg text-sm font-bold transition-all ${
+                qrMode === 'manual'
+                  ? 'bg-white text-amber-700 shadow'
+                  : 'text-gray-500 hover:text-gray-700'
+              }`}
+            >
+              QR สำรอง (อัปโหลดเอง)
+            </button>
+          </div>
+
+          {qrMode === 'auto' ? (
           <div>
             <label className="block text-sm font-semibold text-gray-700 mb-2">PromptPay QR Code</label>
 
-            {/* QR Preview / Upload area */}
+            {/* QR อัตโนมัติ — ไม่ต้องอัพโหลดรูปแล้ว */}
             <div className="flex items-start gap-5">
-              <div
-                className="w-40 h-40 rounded-xl border-2 border-dashed border-gray-300 flex items-center justify-center overflow-hidden cursor-pointer hover:border-blue-400 hover:bg-blue-50/30 transition-all"
-                onClick={() => qrInputRef.current?.click()}
-              >
-                {qrPreview ? (
-                  <img src={qrPreview} alt="QR Preview" className="w-full h-full object-contain" />
+              <div className="w-40 h-40 rounded-xl border-2 border-solid border-green-300 flex items-center justify-center overflow-hidden bg-green-50">
+                <div className="text-center px-2">
+                  <QrCode size={32} className="text-green-500 mx-auto mb-1" />
+                  <span className="text-xs text-green-700 font-semibold">QR อัตโนมัติ</span>
+                </div>
+              </div>
+
+              <div className="flex-1 space-y-3">
+                <p className="text-sm text-gray-600">
+                  ระบบสร้าง QR PromptPay <strong>ตามยอดบิลอัตโนมัติ</strong> ตอนคิดเงิน
+                  และตรวจว่าโอนเงินแล้วก่อนปิดบิล ไม่ต้องอัพโหลดรูปอีกต่อไป
+                </p>
+
+                <p className="text-xs text-gray-400">
+                  ตั้งค่าเบอร์ PromptPay / Paynoi API ในไฟล์ .env ของ backend
+                </p>
+              </div>
+            </div>
+          </div>
+          ) : (
+          <div>
+            <label className="block text-sm font-semibold text-gray-700 mb-2">QR สำรอง (ใช้ตอน Paynoi ล่ม)</label>
+
+            <div className="flex items-start gap-5">
+              <div className="w-40 h-40 rounded-xl border-2 border-dashed border-amber-300 flex items-center justify-center overflow-hidden bg-amber-50">
+                {manualQr ? (
+                  <img src={manualQr} alt="QR สำรอง" className="w-full h-full object-contain" />
                 ) : (
-                  <div className="text-center">
-                    <ImagePlus size={32} className="text-gray-300 mx-auto mb-1" />
-                    <span className="text-xs text-gray-400">อัพโหลด QR</span>
+                  <div className="text-center px-2">
+                    <QrCode size={32} className="text-amber-400 mx-auto mb-1" />
+                    <span className="text-xs text-amber-600 font-semibold">ยังไม่มีรูป</span>
                   </div>
                 )}
               </div>
 
               <div className="flex-1 space-y-3">
-                <input
-                  ref={qrInputRef}
-                  type="file"
-                  accept="image/jpeg,image/png"
-                  onChange={handleQrChange}
-                  className="hidden"
-                />
+                <p className="text-sm text-gray-600">
+                  โหมดสำรอง: โชว์รูปนี้ให้ลูกค้าสแกน แล้ว<strong>กดปิดบิลเอง</strong> (ไม่มีตรวจยอดโอน)
+                </p>
 
-                <button
-                  type="button"
-                  onClick={() => qrInputRef.current?.click()}
-                  className="btn btn-secondary w-full flex items-center justify-center gap-2"
-                >
-                  <ImagePlus size={16} />
-                  {qrPreview ? 'เปลี่ยน QR Code' : 'เลือก QR Code'}
-                </button>
+                <label className="btn w-full flex items-center justify-center gap-2 border border-gray-200 cursor-pointer">
+                  อัปโหลดรูป QR (PNG/JPG ≤ 2MB)
+                  <input
+                    type="file"
+                    accept="image/png,image/jpeg"
+                    className="hidden"
+                    onChange={handleManualQrChange}
+                  />
+                </label>
 
-                {qrPreview && (
+                {manualQr && (
                   <button
                     type="button"
                     onClick={handleRemoveQr}
                     className="btn w-full flex items-center justify-center gap-2 text-red-600 hover:bg-red-50 border border-red-200"
                   >
                     <Trash2 size={16} />
-                    ลบ QR Code
+                    ลบรูป QR สำรอง
                   </button>
                 )}
-
-                <p className="text-xs text-gray-400">
-                  รองรับ: JPG, PNG (สูงสุด 5MB)
-                </p>
               </div>
             </div>
           </div>
+          )}
 
           {/* Info box */}
-          <div className="bg-blue-50 border border-blue-200 rounded-xl p-4">
-            <p className="text-sm text-blue-700">
-              <strong>วิธีใช้:</strong> อัพโหลดรูป QR Code จากธนาคารของคุณ จากนั้น QR จะแสดงในหน้าชำระเงิน POS โดยอัตโนมัติ
+          <div className={`rounded-xl p-4 border ${qrMode === 'auto' ? 'bg-green-50 border-green-200' : 'bg-amber-50 border-amber-200'}`}>
+            <p className={`text-sm ${qrMode === 'auto' ? 'text-green-700' : 'text-amber-700'}`}>
+              {qrMode === 'auto' ? (
+                <><strong>วิธีใช้:</strong> เลือกชำระด้วย QR ในหน้าคิดเงิน ระบบจะสร้าง QR ตามยอดบิลให้ลูกค้าสแกน
+                และปิดบิลอัตโนมัติเมื่อตรวจพบยอดโอน</>
+              ) : (
+                <><strong>โหมดสำรอง:</strong> หน้าคิดเงินจะโชว์รูป QR ที่อัปโหลดไว้
+                พนักงานต้องเห็นเงินเข้าก่อนแล้วกดปิดบิลเอง — อย่าลืมสลับกลับโหมดอัตโนมัติเมื่อ Paynoi ปกติ</>
+              )}
             </p>
           </div>
         </div>

@@ -17,6 +17,7 @@ import { posApi } from '../api/pos.api';
 import { formatCurrency } from '../utils/format';
 import { addDrawerLog, getDrawerState } from '../utils/posStorage';
 import { useNow } from '../hooks/useNow';
+import { usePromptPay } from '../hooks/usePromptPay';
 import { useDialog } from '../context/DialogContext';
 import { useNotificationStore } from '../store/notifications';
 import { getVatRate, getSettings, getReceiptFooter } from '../utils/appSettings';
@@ -68,8 +69,12 @@ export default function Checkout() {
   const drawerBalance = getDrawerState().balance;
   const drawerInsufficient = paymentMethod === 'cash' && receivedNum > drawerBalance;
 
-  // QR (PromptPay) — bill + scan view
-  const qrImage = typeof window !== 'undefined' ? localStorage.getItem('payment.promptpay_qr') : null;
+  // QR (PromptPay) — dynamic QR ตามยอด สร้างจาก backend + ตรวจโอนอัตโนมัติ
+  // (ย้ายจาก Topup-Kbank — เลิกใช้รูป QR จากตั้งค่า)
+  const [paidTxId, setPaidTxId] = useState<string | null>(null);
+  const promptpay = usePromptPay({ onPaid: (txId) => setPaidTxId(txId) });
+  const qrImage = promptpay.qr?.qrCode ?? null;
+  const qrMismatch = !!promptpay.qr && Math.abs(promptpay.qr.amount - totalAmount) > 0.009;
   const totalQty = items.reduce((sum, i) => sum + i.quantity, 0);
 
   // result display per method
@@ -113,6 +118,15 @@ export default function Checkout() {
   /* ----- confirm ----- */
   const handleEnter = () => {
     if (processing) return;
+    if (paymentMethod === 'promptpay') {
+      // โหมด QR สำรอง: พนักงานเห็นเงินเข้าแล้วกดปิดบิลเองได้เลย
+      if (!useManualQr && (promptpay.status !== 'paid' || !promptpay.qr)) {
+        showAlert({ title: 'รอการโอนเงิน', message: 'ลูกค้ายังโอนเงินไม่สำเร็จ กรุณารอให้ระบบตรวจพบยอดโอนก่อน', type: 'warning' });
+        return;
+      }
+      setShowResult(true);
+      return;
+    }
     if (paymentMethod === 'cash') {
       if (receivedNum > drawerBalance) {
         showAlert({
@@ -130,7 +144,7 @@ export default function Checkout() {
     setShowResult(true);
   };
 
-  const finishSale = async () => {
+  const finishSale = async (qrReference?: string) => {
     if (processing) return;
     setProcessing(true);
     try {
@@ -145,7 +159,14 @@ export default function Checkout() {
         discount_amount: 0,
         discount_type: 'fixed',
         vat_rate: vatRate,
-        payments: [{ method: paymentMethod, amount: netAmount }],
+        payments: [
+          {
+            method: paymentMethod,
+            amount: netAmount,
+            // QR แบบ dynamic: ส่ง transactionId ที่ยืนยันว่าโอนแล้วให้ backend กันใช้ซ้ำ
+            ...(paymentMethod === 'promptpay' && qrReference ? { reference: qrReference } : {}),
+          },
+        ],
       });
       const txData = (res.data as { data?: { transactionCode?: string; transactionId?: number } }).data || {};
 
@@ -193,6 +214,37 @@ export default function Checkout() {
     setReceipt(null);
     navigate('/pos', { state: { fromCheckout: true } });
   };
+
+  /* ----- QR: สลับโหมด + สร้าง QR ตามยอด / โอนแล้วปิดบิลเอง ----- */
+  // qrMode: auto = เจนผ่าน Paynoi | manual = รูปสำรอง (ตั้งค่าใน Settings)
+  const [qrMode, setQrMode] = useState<'auto' | 'manual'>(() =>
+    ((localStorage.getItem('payment.qr_mode') as 'auto' | 'manual') || 'auto')
+  );
+  const manualQr = localStorage.getItem('payment.promptpay_qr');
+  const useManualQr = paymentMethod === 'promptpay' && qrMode === 'manual';
+  const switchToQr = () => {
+    setPaymentMethod('promptpay');
+    setPaidTxId(null);
+    setQrMode((localStorage.getItem('payment.qr_mode') as 'auto' | 'manual') || 'auto');
+    if (((localStorage.getItem('payment.qr_mode') as 'auto' | 'manual') || 'auto') === 'auto') {
+      void promptpay.start(totalAmount);
+    }
+  };
+  const switchToCash = () => {
+    setPaymentMethod('cash');
+    setPaidTxId(null);
+    promptpay.reset();
+  };
+
+  // โอนแล้ว → ปิด overlay ขยาย QR + ปิดบิลอัตโนมัติ (เฉพาะตอนอยู่โหมด QR)
+  useEffect(() => {
+    if (paidTxId && paymentMethod === 'promptpay' && !processing && !receipt) {
+      setQrZoom(false);
+      void finishSale(paidTxId);
+      setPaidTxId(null);
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [paidTxId]);
 
   /* ----- QR โหมดขยายใหญ่ (คลิกที่ QR) + ลากย้ายได้ ----- */
   const [qrZoom, setQrZoom] = useState(false);
@@ -404,7 +456,7 @@ export default function Checkout() {
                   รับพอดี
                 </button>
                 <button
-                  onClick={() => setPaymentMethod('promptpay')}
+                  onClick={switchToQr}
                   className="rounded-xl py-3 font-semibold text-sm flex items-center justify-center gap-1.5 active:scale-95 transition-all bg-blue-50 text-blue-700 border border-blue-200 hover:bg-blue-100"
                 >
                   <QrCode size={16} /> QR CODE
@@ -452,7 +504,58 @@ export default function Checkout() {
                 <QrCode size={13} /> QR PROMPTPAY
               </div>
 
-              {qrImage ? (
+              {useManualQr ? (
+                manualQr ? (
+                  <button
+                    type="button"
+                    onClick={() => setQrZoom(true)}
+                    title="คลิกเพื่อดู QR ขนาดใหญ่"
+                    className="relative group shrink-0"
+                  >
+                    <img
+                      src={manualQr}
+                      alt="QR สำรอง"
+                      draggable={false}
+                      className="w-44 h-44 object-contain border-4 border-amber-200 rounded-2xl group-hover:opacity-90 transition-opacity"
+                    />
+                    <span className="absolute inset-x-0 bottom-0 py-1 text-[10px] font-semibold bg-black/50 text-white rounded-b-2xl opacity-0 group-hover:opacity-100 transition-opacity">
+                      คลิกเพื่อขยาย / ลากย้าย
+                    </span>
+                  </button>
+                ) : (
+                  <div className="w-44 h-44 rounded-2xl border-2 border-dashed border-amber-300 flex flex-col items-center justify-center bg-amber-50/50 shrink-0">
+                    <QrCode size={44} className="text-amber-300 mb-2" />
+                    <p className="text-xs text-amber-500 text-center px-3">ยังไม่มีรูป QR สำรอง<br />อัปโหลดในตั้งค่า</p>
+                  </div>
+                )
+              ) : promptpay.loading ? (
+                <div className="w-44 h-44 rounded-2xl border-2 border-dashed border-blue-300 flex flex-col items-center justify-center bg-blue-50/50 shrink-0">
+                  <span className="w-8 h-8 rounded-full border-4 border-blue-300 border-t-blue-600 animate-spin mb-2" />
+                  <p className="text-xs text-blue-500 text-center px-3">กำลังสร้าง QR...</p>
+                </div>
+              ) : promptpay.error ? (
+                <div className="w-44 rounded-2xl border-2 border-dashed border-red-300 flex flex-col items-center justify-center bg-red-50/50 shrink-0 px-3 py-5">
+                  <p className="text-xs text-red-500 text-center">{promptpay.error || 'สร้าง QR ไม่สำเร็จ'}</p>
+                  <div className="flex gap-2 mt-2">
+                    <button
+                      type="button"
+                      onClick={() => void promptpay.start(totalAmount)}
+                      className="px-3 py-1.5 rounded-lg bg-red-600 text-white text-xs font-bold hover:bg-red-700"
+                    >
+                      ลองใหม่
+                    </button>
+                    {manualQr && (
+                      <button
+                        type="button"
+                        onClick={() => { localStorage.setItem('payment.qr_mode', 'manual'); setQrMode('manual'); }}
+                        className="px-3 py-1.5 rounded-lg bg-amber-500 text-white text-xs font-bold hover:bg-amber-600 active:scale-95 transition-all"
+                      >
+                        ใช้ QR สำรองแทน
+                      </button>
+                    )}
+                  </div>
+                </div>
+              ) : qrImage && promptpay.qr ? (
                 <button
                   type="button"
                   onClick={() => setQrZoom(true)}
@@ -472,8 +575,18 @@ export default function Checkout() {
               ) : (
                 <div className="w-44 h-44 rounded-2xl border-2 border-dashed border-blue-300 flex flex-col items-center justify-center bg-blue-50/50 shrink-0">
                   <QrCode size={44} className="text-blue-300 mb-2" />
-                  <p className="text-xs text-blue-400 text-center px-3">ยังไม่มี QR Code<br />ตั้งค่า → อัพโหลด QR</p>
+                  <p className="text-xs text-blue-400 text-center px-3">กด QR CODE<br />เพื่อสร้าง QR ตามยอด</p>
                 </div>
+              )}
+
+              {qrMismatch && promptpay.status !== 'paid' && (
+                <button
+                  type="button"
+                  onClick={() => promptpay.start(totalAmount)}
+                  className="px-4 py-2 rounded-xl bg-amber-100 text-amber-800 border border-amber-300 text-xs font-bold hover:bg-amber-200 shrink-0"
+                >
+                  ยอดเปลี่ยน ({formatCurrency(totalAmount)}) — สร้าง QR ใหม่
+                </button>
               )}
 
               <div className="text-center">
@@ -482,34 +595,49 @@ export default function Checkout() {
                 <p className="text-xs text-gray-400 mt-1">ให้ลูกค้าสแกน QR เพื่อชำระเงิน</p>
               </div>
 
-              <div className="flex items-center gap-2 px-3 py-1.5 rounded-full bg-green-50 text-green-700 border border-green-200 text-xs font-semibold shrink-0">
-                <span className="w-1.5 h-1.5 rounded-full bg-green-500 animate-pulse" />
-                รอการชำระเงิน
-              </div>
+              {useManualQr ? (
+                <div className="flex items-center gap-2 px-3 py-1.5 rounded-full bg-amber-50 text-amber-700 border border-amber-200 text-xs font-semibold shrink-0">
+                  โหมดสำรอง — เห็นเงินเข้าแล้วกดปิดบิลเอง
+                </div>
+              ) : promptpay.status === 'paid' ? (
+                <div className="flex items-center gap-2 px-3 py-1.5 rounded-full bg-green-100 text-green-800 border border-green-300 text-xs font-semibold shrink-0">
+                  <CheckCircle2 size={14} />
+                  ได้รับเงินแล้ว — กำลังปิดบิล...
+                </div>
+              ) : promptpay.error ? (
+                <div className="flex items-center gap-2 px-3 py-1.5 rounded-full bg-red-50 text-red-700 border border-red-200 text-xs font-semibold shrink-0">
+                  สร้าง QR ไม่สำเร็จ
+                </div>
+              ) : (
+                <div className="flex items-center gap-2 px-3 py-1.5 rounded-full bg-green-50 text-green-700 border border-green-200 text-xs font-semibold shrink-0">
+                  <span className="w-1.5 h-1.5 rounded-full bg-green-500 animate-pulse" />
+                  รอการชำระเงิน
+                </div>
+              )}
 
-              <div className="flex-1" />
-
+              <div className="w-full flex flex-col gap-2.5 mt-2">
               <button
                 onClick={handleEnter}
-                disabled={processing}
+                disabled={useManualQr ? (processing || !manualQr) : (processing || promptpay.status !== 'paid')}
                 className="w-full py-3.5 rounded-xl bg-gradient-to-r from-blue-600 to-primary-700 text-white text-base font-bold shadow-lg shadow-blue-600/25 hover:from-blue-700 hover:to-primary-800 active:scale-95 disabled:from-gray-300 disabled:to-gray-300 disabled:shadow-none transition-all shrink-0"
               >
-                ชำระเงินเสร็จสิ้น
+                {useManualQr ? 'ปิดบิล (QR สำรอง)' : (promptpay.status === 'paid' ? 'ชำระเงินเสร็จสิ้น' : 'รอการโอนเงิน...')}
               </button>
 
               <button
-                onClick={() => setPaymentMethod('cash')}
+                onClick={switchToCash}
                 className="w-full rounded-xl py-3 font-bold flex items-center justify-center gap-2 active:scale-95 transition-all bg-green-50 text-green-700 border border-green-200 hover:bg-green-100 shrink-0"
               >
                 <Banknote size={18} /> สลับเป็นเงินสด
               </button>
+              </div>
             </div>
           )}
         </div>
       </div>
 
       {/* ===== QR big draggable overlay ===== */}
-      {qrZoom && qrImage && (
+      {(qrImage || (useManualQr && manualQr)) && qrZoom && (
         <div
           className="fixed inset-0 z-[80] bg-black/60 backdrop-blur-sm flex items-center justify-center"
           onClick={() => setQrZoom(false)}
@@ -538,7 +666,7 @@ export default function Checkout() {
             </div>
 
             <img
-              src={qrImage}
+              src={qrImage || (useManualQr ? manualQr! : '')}
               alt="PromptPay QR ใหญ่"
               draggable={false}
               className="w-[62vmin] h-[62vmin] max-w-[480px] max-h-[480px] object-contain"
@@ -665,7 +793,7 @@ export default function Checkout() {
             </div>
 
             <button
-              onClick={finishSale}
+              onClick={() => finishSale(useManualQr ? 'MANUAL' : (promptpay.status === 'paid' ? promptpay.qr?.transactionId : undefined))}
               disabled={processing}
               className="mt-6 w-full py-3.5 rounded-xl bg-green-600 text-white font-bold text-lg hover:bg-green-700 disabled:bg-gray-300 active:scale-[0.99] transition-all"
             >

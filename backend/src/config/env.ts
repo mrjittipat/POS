@@ -24,4 +24,9 @@ export const env = {
 
   // Frontend URL
   FRONTEND_URL: process.env.FRONTEND_URL || 'http://localhost:5173',
+
+  // PromptPay (ย้ายจาก Topup-Kbank — สร้าง QR ตามยอด + ตรวจโอนผ่าน Paynoi)
+  PROMPTPAY_PHONE: process.env.PROMPTPAY_PHONE || '',
+  PAYNOI_API_KEY: process.env.PAYNOI_API_KEY || '',
+  PAYNOI_RECORD_KEY: process.env.PAYNOI_RECORD_KEY || '',
 };

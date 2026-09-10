@@ -21,13 +21,17 @@ dist/
 .DS_Store
 Thumbs.db
 
-# Uploads
-uploads/
-backend/uploads/
+# Uploads - product images (keep tracked for backup)
+# uploads/
+# backend/uploads/
+!backend/uploads/.gitkeep
 
 # Logs
 *.log
 npm-debug.log*
+
+# DB dumps (keep for restore)
+!database/dumps/*.sql
 
 # Docker
 .docker/
